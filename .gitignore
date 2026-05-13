@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+.env
+.env.local
+.env.*.local
+
+# Rust
+target/
+Cargo.lock
+
+# MLflow
+mlruns/
+.mlflow/
+
+# SLURM artifacts
+*.out
+*.err
+
+# Triton GPU compiler cache and Triton Inference Server cache
+.triton/
+triton_cache/
+
+# Ray
+/tmp/ray/
+ray_session_*/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.pem
+*.key
+secrets/
+
+# Benchmark result files (summarise in MLflow / docs/ instead)
+*.csv
+*.json.bench
+criterion/
+
+# Claude local overrides
+CLAUDE.local.md

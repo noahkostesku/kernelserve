@@ -1,0 +1,46 @@
+{
+  "model": "claude-sonnet-4-6",
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(cargo:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)",
+      "Bash(sbatch:*)",
+      "Bash(squeue:*)",
+      "Bash(seff:*)",
+      "Bash(salloc:*)",
+      "Bash(scancel:*)",
+      "Bash(module:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(tritonserver:*)",
+      "Bash(mlflow:*)",
+      "Bash(git:*)",
+      "Bash(uv:*)",
+      "Bash(bash -n *)"
+    ],
+    "deny": []
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'cmd=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get(\\\"command\\\",\\\"\\\"))\"); case \"$cmd\" in rm\\ -rf*|\"git push --force\"*|\"git reset --hard\"*) echo \"BLOCKED: destructive command requires explicit user confirmation\" >&2; exit 1;; esac'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": []
+  }
+}

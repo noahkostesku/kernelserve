@@ -1,0 +1,29 @@
+name: "triton_native_backend"
+backend: "python"
+max_batch_size: 8
+
+input [
+  {
+    name: "INPUT_0"
+    data_type: TYPE_FP32
+    dims: [ 512, 768 ]
+  }
+]
+
+output [
+  {
+    name: "OUTPUT_0"
+    data_type: TYPE_FP32
+    dims: [ 512, 768 ]
+  }
+]
+
+instance_group [
+  {
+    kind: KIND_GPU
+    count: 1
+    gpus: [ 0 ]
+  }
+]
+
+# TODO: enable dynamic batching once kernel supports variable batch sizes

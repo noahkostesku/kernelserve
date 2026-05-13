@@ -1,0 +1,39 @@
+name: SLURM Dry Run
+
+on:
+  pull_request:
+    paths:
+      - "slurm/**"
+
+jobs:
+  validate-scripts:
+    name: Validate SLURM scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bash syntax check
+        run: |
+          for script in slurm/*.sh; do
+            echo "Checking $script..."
+            bash -n "$script" && echo "  OK: $script" || { echo "  FAIL: $script"; exit 1; }
+          done
+
+      - name: Print SBATCH directives
+        run: |
+          echo "=== SBATCH directives in changed scripts ==="
+          for script in slurm/*.sh; do
+            echo ""
+            echo "--- $script ---"
+            grep "^#SBATCH" "$script" || echo "(none)"
+          done
+
+      - name: Check for required directives
+        run: |
+          for script in slurm/*.sh; do
+            echo "Checking required directives in $script..."
+            grep -q "^#SBATCH --account=" "$script" || { echo "FAIL: missing --account in $script"; exit 1; }
+            grep -q "^#SBATCH --time=" "$script"    || { echo "FAIL: missing --time in $script"; exit 1; }
+            grep -q "^#SBATCH --output=" "$script"  || { echo "FAIL: missing --output in $script"; exit 1; }
+            echo "  OK: $script"
+          done

@@ -1,0 +1,41 @@
+# OpenTelemetry Collector configuration for KernelServe.
+# Run with: otelcol --config observability/otel/collector.yaml
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "kernelserve"
+  logging:
+    verbosity: normal
+  # TODO: add OTLP export to a remote backend (Grafana Cloud, Jaeger, etc.)
+  # otlp/remote:
+  #   endpoint: ${env:OTEL_REMOTE_ENDPOINT}
+  #   headers:
+  #     authorization: "Bearer ${env:OTEL_REMOTE_TOKEN}"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [logging]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus, logging]

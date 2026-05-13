@@ -1,0 +1,30 @@
+# Ray cluster config for local SLURM mode.
+# TODO: update head_node_ip and worker resources for Narval once cluster setup is tested.
+
+cluster_name: kernelserve
+
+provider:
+  type: local
+  head_ip: 127.0.0.1
+  worker_ips: []  # TODO: add Narval worker node IPs or use auto-discovery
+
+head_node_type:
+  resources:
+    CPU: 8
+    GPU: 1
+
+worker_node_types:
+  - name: gpu_worker
+    resources:
+      CPU: 8
+      GPU: 1
+    min_workers: 0
+    max_workers: 4  # TODO: adjust based on Narval allocation
+
+runtime_env:
+  pip:
+    - ray[serve]
+    - tritonclient[grpc]
+  env_vars:
+    TRITON_GRPC_URL: "localhost:8001"
+    TRITON_MODEL_NAME: "cuda_oxide_backend"

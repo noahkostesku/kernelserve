@@ -1,0 +1,68 @@
+name: Benchmark Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel:
+        description: "Kernel name to benchmark (e.g. rms_norm)"
+        required: true
+        default: "rms_norm"
+      batch_size:
+        description: "Batch size"
+        required: false
+        default: "8"
+      seq_len:
+        description: "Sequence length"
+        required: false
+        default: "512"
+
+jobs:
+  benchmark:
+    name: Run benchmark on GPU runner
+    # TODO: replace with a self-hosted GPU runner label for Narval
+    runs-on: [self-hosted, gpu, a100]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Build Rust kernels
+        working-directory: kernels/cuda_oxide
+        run: cargo build --release
+
+      - name: Run benchmark
+        run: |
+          uv run pytest tests/benchmark/ -m gpu \
+            -k "${{ github.event.inputs.kernel }}" \
+            --benchmark-json=/tmp/bench_results.json
+
+      - name: Log to MLflow
+        run: |
+          uv run python experiments/mlflow_setup.py log \
+            --kernel "${{ github.event.inputs.kernel }}" \
+            --results /tmp/bench_results.json \
+            --commit "${{ github.sha }}"
+
+      - name: Post results as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('/tmp/bench_results.json', 'utf8'));
+            const body = `## Benchmark Results — \`${{ github.event.inputs.kernel }}\`\n\n` +
+              `Commit: \`${{ github.sha }}\`\n\n` +
+              `\`\`\`\n${JSON.stringify(results.benchmarks?.slice(0,5), null, 2)}\n\`\`\``;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });

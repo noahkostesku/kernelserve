@@ -1,0 +1,25 @@
+# Prometheus scrape configuration for KernelServe.
+# Append this to your prometheus.yml under scrape_configs:, or use as a standalone config.
+
+scrape_configs:
+  - job_name: kernelserve
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - localhost:8889  # OTel collector Prometheus exporter
+
+  - job_name: triton
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - localhost:8002  # Triton metrics endpoint (HTTP port + 2)
+
+  - job_name: ray
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - localhost:8080  # Ray dashboard metrics
+          # TODO: add Ray worker node IPs if running in cluster mode
