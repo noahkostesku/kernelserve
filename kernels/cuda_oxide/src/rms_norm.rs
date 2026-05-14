@@ -138,13 +138,60 @@ impl RmsNorm {
     /// # Errors
     ///
     /// Returns [`RmsNormError::CudaLaunch`] if the CUDA kernel fails to launch.
+    #[cfg(feature = "gpu")]
+    pub fn forward(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>, RmsNormError> {
+        use std::sync::Arc;
+        use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+
+        let hidden_dim = weight.len();
+        let batch = input.len() / hidden_dim;
+
+        let ctx: Arc<CudaContext> = CudaContext::new(0)
+            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
+        let stream = ctx.default_stream();
+
+        // PTX path: set KERNELSERVE_PTX or place the file at ptx/kernelserve-kernels.ptx
+        let ptx_path = std::env::var("KERNELSERVE_PTX")
+            .unwrap_or_else(|_| "ptx/kernelserve-kernels.ptx".to_string());
+        let cu_module = ctx
+            .load_module_from_file(&ptx_path)
+            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
+        let module = kernels::from_module(cu_module)
+            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
+
+        let input_dev = DeviceBuffer::from_host(&stream, input)
+            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
+        let weight_dev = DeviceBuffer::from_host(&stream, weight)
+            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
+        let mut output_dev = DeviceBuffer::<f32>::zeroed(&stream, input.len())
+            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
+
+        let cfg = LaunchConfig {
+            grid_dim: (batch as u32, 1, 1),
+            block_dim: (128, 1, 1),
+            shared_mem_bytes: 0,
+        };
+
+        module
+            .rms_norm_kernel(
+                &stream,
+                cfg,
+                &input_dev,
+                &weight_dev,
+                &mut output_dev,
+                self.eps,
+                hidden_dim as u32,
+            )
+            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
+
+        output_dev
+            .to_host_vec(&stream)
+            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))
+    }
+
+    #[cfg(not(feature = "gpu"))]
     pub fn forward(&self, _input: &[f32], _weight: &[f32]) -> Result<Vec<f32>, RmsNormError> {
-        // TODO: wire up CUDA launch via cuda-host / cuda-core (enable `gpu` feature):
-        //   1. Allocate DeviceBuffer for input, weight, output
-        //   2. Copy host → device
-        //   3. Launch kernels::rms_norm_kernel with grid=(batch, 1, 1), block=(128, 1, 1)
-        //   4. Copy output device → host
         let _ = self.eps;
-        todo!("rms_norm forward host launch not yet implemented")
+        todo!("rms_norm forward: build with --features gpu")
     }
 }
