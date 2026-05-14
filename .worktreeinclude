@@ -1,2 +1,6 @@
+# Files to copy into each new git worktree even though they are gitignored.
+# These are safe to copy because they contain no secrets beyond what the
+# worktree would need to run locally (cluster credentials live in .env.cluster).
 .env
-.env.local
+.env.cluster
+slurm/.env.cluster

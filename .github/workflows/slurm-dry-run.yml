@@ -1,39 +1,127 @@
 name: SLURM Dry Run
 
+# Only fires when a PR touches files under slurm/ — no point running this elsewhere.
 on:
   pull_request:
     paths:
       - "slurm/**"
 
 jobs:
-  validate-scripts:
+  validate:
     name: Validate SLURM scripts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bash syntax check
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: shellcheck all .sh files
+        # shellcheck catches unreachable code, quoting bugs, and SC2 class warnings
+        # that bash -n misses entirely.
         run: |
-          for script in slurm/*.sh; do
-            echo "Checking $script..."
-            bash -n "$script" && echo "  OK: $script" || { echo "  FAIL: $script"; exit 1; }
+          find slurm/ -name "*.sh" | sort | while IFS= read -r script; do
+            echo "shellcheck: $script"
+            shellcheck "$script"
           done
 
-      - name: Print SBATCH directives
+      - name: Validate #SBATCH directives
         run: |
-          echo "=== SBATCH directives in changed scripts ==="
-          for script in slurm/*.sh; do
-            echo ""
-            echo "--- $script ---"
-            grep "^#SBATCH" "$script" || echo "(none)"
-          done
+          python - <<'EOF'
+          import re, sys, pathlib
 
-      - name: Check for required directives
+          # SLURM accepts: [[D-]H:]M:S, [[D-]H:]M, or D-H (any non-negative integers)
+          TIME_RE  = re.compile(r"^(\d+-)?(\d+:){0,2}\d+$")
+          # mem-per-gpu: a positive integer followed by K, M, G, or T
+          MEM_RE   = re.compile(r"^\d+[KMGT]$")
+          # gres must be gpu:N where N is between 1 and 8 inclusive
+          GRES_RE  = re.compile(r"^gpu:[1-8]$")
+
+          errors = []
+          for script in sorted(pathlib.Path("slurm").glob("*.sh")):
+              directives: dict[str, str] = {}
+              for line in script.read_text().splitlines():
+                  m = re.match(r"^#SBATCH\s+--([a-z][a-z0-9-]*)=(.+)$", line)
+                  if m:
+                      directives[m.group(1)] = m.group(2).strip()
+
+              t = directives.get("time", "")
+              if not TIME_RE.match(t):
+                  errors.append(f"{script}: invalid --time format '{t}' (expected [[D-]H:]M[:S])")
+
+              mem = directives.get("mem-per-gpu", "")
+              if mem and not MEM_RE.match(mem):
+                  errors.append(f"{script}: invalid --mem-per-gpu format '{mem}' (expected e.g. 40G)")
+
+              gres = directives.get("gres", "")
+              if not GRES_RE.match(gres):
+                  errors.append(
+                      f"{script}: --gres must be 'gpu:N' with N in 1-8, got '{gres}'"
+                  )
+
+          if errors:
+              for e in errors:
+                  print(f"FAIL: {e}", file=sys.stderr)
+              sys.exit(1)
+
+          print("All #SBATCH directives are valid.")
+          EOF
+
+      - name: Check module names against allowed list
+        # docs/allowed_modules.txt is the curated list of modules available on Narval.
+        # Unlisted modules silently disappear at runtime, so catching them in CI is important.
         run: |
-          for script in slurm/*.sh; do
-            echo "Checking required directives in $script..."
-            grep -q "^#SBATCH --account=" "$script" || { echo "FAIL: missing --account in $script"; exit 1; }
-            grep -q "^#SBATCH --time=" "$script"    || { echo "FAIL: missing --time in $script"; exit 1; }
-            grep -q "^#SBATCH --output=" "$script"  || { echo "FAIL: missing --output in $script"; exit 1; }
-            echo "  OK: $script"
-          done
+          python - <<'EOF'
+          import re, sys, pathlib
+
+          allowed_path = pathlib.Path("docs/allowed_modules.txt")
+          if not allowed_path.exists():
+              print("FAIL: docs/allowed_modules.txt not found.", file=sys.stderr)
+              sys.exit(1)
+
+          allowed = {
+              l.strip()
+              for l in allowed_path.read_text().splitlines()
+              if l.strip() and not l.startswith("#")
+          }
+
+          errors = []
+          for script in sorted(pathlib.Path("slurm").glob("*.sh")):
+              for lineno, line in enumerate(script.read_text().splitlines(), 1):
+                  m = re.match(r"^\s*module\s+load\s+(.+)$", line)
+                  if not m:
+                      continue
+                  for mod in m.group(1).split():
+                      if mod not in allowed:
+                          errors.append(f"{script}:{lineno}: unknown module '{mod}'")
+
+          if errors:
+              for e in errors:
+                  print(f"FAIL: {e}", file=sys.stderr)
+              sys.exit(1)
+
+          print("All module loads reference allowed modules.")
+          EOF
+
+      - name: Check for bare python calls (must use srun)
+        # On Alliance HPC, every compute call inside an sbatch script must go through
+        # srun so SLURM can track and limit resources correctly. A bare `python` or
+        # `uv run` that bypasses srun can oversubscribe nodes and break accounting.
+        run: |
+          failed=0
+          while IFS= read -r -d '' script; do
+            lineno=0
+            while IFS= read -r line; do
+              lineno=$(( lineno + 1 ))
+              # skip blank lines and comment lines
+              [[ -z "${line// }" || "$line" =~ ^[[:space:]]*# ]] && continue
+              # skip lines that already have srun on them
+              [[ "$line" =~ srun ]] && continue
+              # flag bare python / python3 / uv run invocations
+              if [[ "$line" =~ (^|[[:space:]])(python3?|uv[[:space:]]+run)[[:space:]] ]]; then
+                echo "FAIL: $script:$lineno: python call without srun — $line" >&2
+                failed=1
+              fi
+            done < "$script"
+          done < <(find slurm/ -name "*.sh" -print0)
+          exit $failed

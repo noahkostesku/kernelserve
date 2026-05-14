@@ -1,44 +1,63 @@
 ---
-description: Run the full benchmark suite for a named kernel against all three implementations (cuda-oxide, Triton, PyTorch) and log results to MLflow
-argument-hint: <kernel-name> [--batch-size N] [--seq-len N]
-allowed-tools: [Bash, Read, Grep]
+description: Run the full benchmark suite across all three backends (cuda-oxide, Triton, PyTorch) for a specified kernel and log to MLflow
+argument-hint: [kernel-name]
+allowed-tools: [Bash, Read]
 ---
 
 # /bench — Kernel Benchmark Runner
 
-Kernel: $ARGUMENTS
-
 ## Steps
 
-1. Parse kernel name and optional `--batch-size` / `--seq-len` from $ARGUMENTS (defaults: batch=8, seq_len=512)
-2. Verify the kernel exists:
-   - Rust: `grep -r "<kernel_name>" kernels/cuda_oxide/src/`
-   - Triton: `ls kernels/triton/<kernel_name>.py`
-3. Build the Rust crate: `cd kernels/cuda_oxide && cargo build --release`
-4. Run pytest benchmark suite:
+1. If $ARGUMENTS is empty, ask: "Which kernel to benchmark? (rms_norm / fused_attn / all)"
+   Otherwise use $ARGUMENTS as the kernel name.
+
+2. Check GPU availability:
    ```bash
-   pytest tests/benchmark/ -m gpu -k "<kernel_name>" --benchmark-json=/tmp/bench_<kernel_name>.json
+   nvidia-smi
    ```
-5. Log results to MLflow:
+   If this fails, abort: "No GPU detected — benchmark requires a GPU."
+
+3. Check if Triton Inference Server is running:
    ```bash
-   python experiments/mlflow_setup.py log \
-     --kernel <kernel_name> \
-     --results /tmp/bench_<kernel_name>.json \
-     --commit $(git rev-parse --short HEAD)
+   curl -s --max-time 3 http://localhost:8000/v2/health/ready
    ```
-6. Print a summary table of p50/p99 latency and throughput for each implementation
-7. If any implementation is >2× slower than the fastest, flag it with a warning
+   If not ready, start it:
+   ```bash
+   docker compose up -d triton
+   ```
+   Poll every 3 s up to 30 s. Abort if still not ready.
 
-## Output format
+4. For each backend in `cuda_oxide triton pytorch`, run perf_analyzer:
+   ```bash
+   perf_analyzer -m <kernel>_<backend> -u localhost:8001 \
+     --concurrency-range 1 \
+     --measurement-interval 5000 \
+     --warmup-request-count 3 \
+     --measurement-request-count 100 \
+     --percentile 99
+   ```
+   Parse p50, p99 latency (ms) and throughput (infer/s) from stdout.
+   If `all` was selected, repeat for every kernel.
 
-```
-Kernel: <name>  |  Commit: <sha>  |  GPU: A100 40GB (sm_80)
-─────────────────────────────────────────────────────────────
-impl          │ p50 (μs) │ p99 (μs) │ throughput (GFLOPS)
-──────────────┼──────────┼──────────┼────────────────────
-cuda-oxide    │   <val>  │   <val>  │       <val>
-triton        │   <val>  │   <val>  │       <val>
-pytorch       │   <val>  │   <val>  │       <val>
-```
+5. Log results to MLflow. Use experiment name format exactly:
+   `kernelserve/<kernel>/<backend>/narval/<YYYY-MM>`
+   Set URI to `file://$SCRATCH/mlruns` when `$SCRATCH` is set, else `./mlruns`.
+   Tag every run:
+   ```python
+   mlflow.set_tag("git_sha", subprocess.check_output(["git","rev-parse","--short","HEAD"]).decode().strip())
+   ```
 
-MLflow run logged to experiment: kernelserve/<kernel_name>
+6. Print a markdown comparison table:
+
+   ```
+   | Backend    | p50 (ms) | p99 (ms) | Throughput (infer/s) |
+   |------------|----------|----------|----------------------|
+   | cuda_oxide |          |          |                      |
+   | triton     |          |          |                      |
+   | pytorch    |          |          |                      |
+   ```
+
+   Flag any backend that is >2× slower than the fastest with a warning.
+
+7. Ask: "Open Grafana dashboard at http://localhost:3000/d/kernelserve? (y/n)"
+   Do not open it unless the user says yes.

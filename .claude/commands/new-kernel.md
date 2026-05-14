@@ -1,31 +1,90 @@
 ---
-description: Scaffold a new kernel with stub files in cuda_oxide/src/, kernels/triton/, and tests/benchmark/
-argument-hint: <kernel-name>
+description: Scaffold a new kernel with all required boilerplate across cuda_oxide, Triton, serving, and tests
+argument-hint: [kernel-name]
 allowed-tools: [Bash, Read, Write, Edit]
 ---
 
 # /new-kernel — Kernel Scaffolder
 
-Kernel name: $ARGUMENTS
-
-## What this command creates
-
-1. `kernels/cuda_oxide/src/<kernel_name>.rs` — Rust stub with `pub struct` and `todo!()` forward pass
-2. `kernels/triton/<kernel_name>.py` — Triton stub with `@triton.jit` decorator and PyTorch reference
-3. Adds `pub mod <kernel_name>;` and `pub use <kernel_name>::*;` to `kernels/cuda_oxide/src/lib.rs`
-4. `tests/benchmark/test_<kernel_name>.py` — pytest-benchmark stub for all three impls
-
 ## Steps
 
-1. Validate that $ARGUMENTS is a valid Rust identifier (snake_case, no hyphens)
-2. Check that the name doesn't already exist in `kernels/cuda_oxide/src/`
-3. Create the three files listed above
-4. Run `cargo check` in `kernels/cuda_oxide/` to verify the new module compiles
-5. Run `pytest tests/benchmark/test_<kernel_name>.py --collect-only` to verify test discovery
-6. Update the kernel registry table in `kernels/CLAUDE.md`
-7. Report the created file paths and remind the user to implement the TODOs
+1. If $ARGUMENTS is empty, ask: "Kernel name? (snake_case, e.g. rms_norm)"
+   Validate it is snake_case with no hyphens and is a valid Rust identifier.
+   Ask: "One-sentence description of what this kernel computes?"
 
-## Naming conventions
+2. Check the name does not already exist:
+   ```bash
+   ls kernels/cuda_oxide/src/<name>.rs 2>/dev/null && echo "EXISTS"
+   ```
+   Abort if it already exists.
 
-- Use snake_case: `rms_norm`, `fused_attn`, `flash_attn_v2`
-- Do not prefix with `cuda_` or `triton_` — the directory provides that context
+3. Create `kernels/cuda_oxide/src/<name>.rs`:
+   ```rust
+   use cuda_oxide::prelude::*;
+
+   #[kernel]
+   pub fn <name>(/* TODO: add parameters */) {
+       todo!("<description>");
+   }
+   ```
+
+4. Create `kernels/triton/<name>.py`:
+   ```python
+   import triton
+   import triton.language as tl
+   import torch
+
+   @triton.jit
+   def <name>_kernel(
+       # TODO: add pointer and stride arguments
+       BLOCK_SIZE: tl.constexpr,
+   ):
+       pass  # TODO: implement
+
+   def <name>(x: torch.Tensor) -> torch.Tensor:
+       """<description>"""
+       raise NotImplementedError
+   ```
+
+5. Create `tests/unit/test_<name>.py`:
+   ```python
+   import pytest
+   import torch
+
+   @pytest.mark.parametrize("shape", [(128, 512), (256, 1024)])
+   def test_<name>_correctness(shape):
+       x = torch.randn(*shape, device="cpu")
+       ref = None   # TODO: PyTorch reference output
+       out = None   # TODO: call kernel under test
+       assert torch.allclose(ref, out, atol=1e-4), f"max err {(ref - out).abs().max()}"
+   ```
+
+6. Create `serving/triton_backends/<name>/config.pbtxt`:
+   ```
+   name: "<name>"
+   backend: "python"
+   max_batch_size: 32
+
+   input [{ name: "INPUT" data_type: TYPE_FP32 dims: [-1, -1] }]
+   output [{ name: "OUTPUT" data_type: TYPE_FP32 dims: [-1, -1] }]
+
+   instance_group [{ kind: KIND_GPU count: 1 }]
+   ```
+
+7. Register in `kernels/cuda_oxide/src/lib.rs` — add after the last `pub mod` line:
+   ```rust
+   pub mod <name>;
+   pub use <name>::*;
+   ```
+
+8. Run a quick compile check:
+   ```bash
+   cd kernels/cuda_oxide && cargo check 2>&1 | tail -5
+   ```
+   And verify test discovery:
+   ```bash
+   pytest tests/unit/test_<name>.py --collect-only -q
+   ```
+
+9. Show all created file paths. Ask: "Commit scaffolding now? (y/n)"
+   If yes, commit with exactly: `feat: scaffold <name> kernel`

@@ -1,46 +1,236 @@
 {
+  // KernelServe project settings for Claude Code.
+  // JSONC comments are supported — raw JSON parsers will reject this file.
+
+  // ── Model ──────────────────────────────────────────────────────────────────
+  // A second model for planning sessions cannot be expressed here today;
+  // switch interactively with /model claude-opus-4-7 before a /plan session
+  // and restore it afterward.
   "model": "claude-sonnet-4-6",
+
+  // ── Attribution ────────────────────────────────────────────────────────────
+  // Suppresses "Co-Authored-By: Claude" from git commit messages.
+  "includeCoAuthoredBy": false,
+
+  // ── Permissions ────────────────────────────────────────────────────────────
   "permissions": {
     "allow": [
-      "Bash(find:*)",
-      "Bash(grep:*)",
-      "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(cargo:*)",
-      "Bash(python:*)",
-      "Bash(python3:*)",
+      // Reads are unrestricted — grep/diff/log all need broad access.
+      "Read(**)",
+
+      // Writes and edits are gated to project work directories only.
+      // .github/ writes are denied below regardless of these patterns.
+      "Write(kernels/**)",
+      "Write(serving/**)",
+      "Write(observability/**)",
+      "Write(experiments/**)",
+      "Write(slurm/**)",
+      "Write(tests/**)",
+      "Write(scripts/**)",
+      "Write(docs/**)",
+      "Write(.claude/**)",
+      "Edit(kernels/**)",
+      "Edit(serving/**)",
+      "Edit(observability/**)",
+      "Edit(experiments/**)",
+      "Edit(slurm/**)",
+      "Edit(tests/**)",
+      "Edit(scripts/**)",
+      "Edit(docs/**)",
+      "Edit(.claude/**)",
+
+      // ── Bash allow-list ────────────────────────────────────────────────────
+      // Commands NOT listed here will prompt for approval before running.
+      // Intentionally absent: git push, sbatch, pip install → will prompt.
+
+      // Build / lint / test
+      "Bash(cargo:*)",       // includes `cargo oxide build`
       "Bash(pytest:*)",
       "Bash(ruff:*)",
       "Bash(mypy:*)",
-      "Bash(sbatch:*)",
+      "Bash(uv:*)",          // uv run / uv sync / uv lock — not pip install
+      "Bash(bash -n *)",     // syntax-check SLURM scripts without running them
+
+      // Python interpreter
+      "Bash(python3:*)",
+      "Bash(python:*)",
+
+      // Filesystem navigation (read-only flavour)
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(du:*)",
+      "Bash(wc:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(stat:*)",
+
+      // Text processing
+      "Bash(echo:*)",
+      "Bash(printf:*)",
+      "Bash(jq:*)",
+      "Bash(sort:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(cut:*)",
+      "Bash(tr:*)",
+      "Bash(xargs:*)",
+      "Bash(tee:*)",
+      "Bash(diff:*)",
+      "Bash(patch:*)",
+
+      // Filesystem mutation (non-destructive)
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(chmod:*)",
+      "Bash(ln:*)",
+      "Bash(tar:*)",
+      "Bash(gzip:*)",
+      "Bash(zcat:*)",
+
+      // Git — local / read-side operations only; push is absent → prompts.
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git switch:*)",
+      "Bash(git restore:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "Bash(git tag:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git worktree:*)",
+      "Bash(git shortlog:*)",
+      "Bash(git blame:*)",
+
+      // HPC monitoring (read-only SLURM commands)
       "Bash(squeue:*)",
+      "Bash(sinfo:*)",
+      "Bash(scancel:*)",
+      "Bash(sacct:*)",
       "Bash(seff:*)",
       "Bash(salloc:*)",
-      "Bash(scancel:*)",
+
+      // Environment / hardware inspection
       "Bash(module:*)",
       "Bash(nvidia-smi:*)",
-      "Bash(tritonserver:*)",
+      "Bash(nvcc:*)",
+      "Bash(date)",
+      "Bash(pwd)",
+      "Bash(which:*)",
+      "Bash(type:*)",
+      "Bash(env)",
+      "Bash(printenv:*)",
+
+      // MLflow CLI (reading experiments, running UI, etc.)
       "Bash(mlflow:*)",
-      "Bash(git:*)",
-      "Bash(uv:*)",
-      "Bash(bash -n *)"
+
+      // Triton Inference Server inspection
+      "Bash(tritonserver:*)"
     ],
-    "deny": []
+
+    "deny": [
+      // CI configuration is human-owned — block all automated writes.
+      "Write(.github/**)",
+      "Edit(.github/**)",
+
+      // Hard backstop for the most destructive rm variants.
+      // The PreToolUse hook fires first and gives a friendlier message.
+      "Bash(rm -rf .)",
+      "Bash(rm -rf ./)",
+      "Bash(rm -rf /)"
+    ]
   },
+
+  // ── Hooks ──────────────────────────────────────────────────────────────────
+  // Hook stdin: tool input is available as $CLAUDE_TOOL_INPUT (JSON string).
+  // PreToolUse: exit 2 = hard block; exit 0 = allow.
+  // PostToolUse: stdout is appended to the tool result shown to Claude.
+  // UserPromptSubmit: stdout is injected as system context for the turn.
   "hooks": {
+
+    // ── PreToolUse ────────────────────────────────────────────────────────────
     "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
           {
+            // Block rm -rf targeting the repo root or any named project dir.
+            // Exit 2 is the hard-block signal for PreToolUse hooks.
             "type": "command",
-            "command": "bash -c 'cmd=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get(\\\"command\\\",\\\"\\\"))\"); case \"$cmd\" in rm\\ -rf*|\"git push --force\"*|\"git reset --hard\"*) echo \"BLOCKED: destructive command requires explicit user confirmation\" >&2; exit 1;; esac'"
+            "command": "cmd=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('command',''))\" 2>/dev/null || echo ''); if echo \"$cmd\" | grep -qE 'rm[[:space:]]+-rf[[:space:]]+(\\./?([[:space:]]|$)|kernels|serving|observability|experiments|slurm|tests|scripts|docs|/)'; then printf 'BLOCKED: rm -rf targeting a project directory or repo root is not allowed.\\nDelete specific files individually, or use rm without the -rf flags.\\n' >&2; exit 2; fi"
           }
         ]
       }
     ],
-    "PostToolUse": []
+
+    // ── PostToolUse ───────────────────────────────────────────────────────────
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            // After every `cargo oxide build`, print PTX file sizes so kernel
+            // bloat is visible without a separate du/find invocation.
+            "type": "command",
+            "command": "cmd=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('command',''))\" 2>/dev/null || echo ''); if echo \"$cmd\" | grep -q 'cargo oxide build'; then echo ''; echo '=== PTX kernel sizes (kernels/cuda_oxide/ptx/) ==='; ptx_files=$(find kernels/cuda_oxide/ptx -name '*.ptx' 2>/dev/null | sort); if [ -n \"$ptx_files\" ]; then echo \"$ptx_files\" | while IFS= read -r f; do printf '%10d B  %s\\n' \"$(wc -c < \"$f\")\" \"$f\"; done; else echo '  (no .ptx files — verify the build completed and PTX output is enabled)'; fi; echo ''; fi"
+          }
+        ]
+      }
+    ],
+
+    // ── UserPromptSubmit ──────────────────────────────────────────────────────
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            // When the user's prompt mentions a benchmark, inject a reminder
+            // about MLflow logging requirements before Claude sees the prompt.
+            "type": "command",
+            "command": "prompt=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('prompt',''))\" 2>/dev/null || echo ''); if echo \"$prompt\" | grep -qiE '\\bbench(mark)?s?\\b'; then printf '[Auto-injected — benchmark keyword detected]\\nLog all results to MLflow before the task is considered complete:\\n  Experiment format (all 5 segments required):\\n    kernelserve/<kernel>/<backend>/<cluster>/YYYY-MM\\n    e.g. kernelserve/rms_norm/cuda_oxide/narval/2026-05\\n  Required tag: mlflow.set_tag(\"git_sha\", subprocess.check_output([\"git\",\"rev-parse\",\"--short\",\"HEAD\"]).decode())\\n  MLflow URI on HPC: file://$SCRATCH/mlruns\\n'; fi"
+          }
+        ]
+      }
+    ],
+
+    // ── WorktreeCreate ────────────────────────────────────────────────────────
+    // REQUIRES Claude Code >= 2.1.50 — WorktreeCreate hook event.
+    // If Claude Code rejects this key, remove it and copy credentials manually.
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            // Copy .env and slurm/.env.cluster into each new worktree so HPC
+            // credentials and cluster variables are immediately available.
+            // Uses -n (no-clobber) to avoid overwriting worktree-local overrides.
+            "type": "command",
+            "command": "wt=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('worktree_path',''))\" 2>/dev/null || echo ''); if [ -n \"$wt\" ]; then [ -f .env ] && cp -n .env \"$wt/.env\" && echo \"Copied .env -> $wt/.env\"; mkdir -p \"$wt/slurm\"; [ -f slurm/.env.cluster ] && cp -n slurm/.env.cluster \"$wt/slurm/.env.cluster\" && echo \"Copied slurm/.env.cluster -> $wt/slurm/.env.cluster\"; fi"
+          }
+        ]
+      }
+    ],
+
+    // ── WorktreeRemove ────────────────────────────────────────────────────────
+    // REQUIRES Claude Code >= 2.1.50 — WorktreeRemove hook event.
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            // Prune stale worktree refs from .git/worktrees after removal.
+            "type": "command",
+            "command": "git worktree prune && echo 'git worktree prune complete'"
+          }
+        ]
+      }
+    ]
   }
 }

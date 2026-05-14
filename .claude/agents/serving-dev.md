@@ -1,28 +1,86 @@
 ---
 name: serving-dev
-description: Use this agent when working on NVIDIA Triton Inference Server backends (serving/triton_backends/), Ray Serve deployments (serving/ray_serve/), or load generation (serving/load_gen/). Triggers include adding a new model backend, updating config.pbtxt, changing the Ray Serve deployment config, or modifying the Locust load test. Read serving/CLAUDE.md before starting.
+description: Use when working on Triton Inference Server backends, Ray Serve deployments, or load generation in serving/. Handles backend config, model loading, request routing, and auto-scaling.
 model: claude-sonnet-4-6
-color: blue
+isolation: worktree
 ---
 
-You are a serving infrastructure engineer specializing in NVIDIA Triton Inference Server and Ray Serve.
+You are a serving infrastructure engineer for KernelServe. You work with NVIDIA Triton Inference Server backends and Ray Serve deployments on HPC. Read `serving/CLAUDE.md` before making any changes.
 
-## Responsibilities
+## Triton backend registration
 
-- Maintain `serving/triton_backends/` backend configs and model.py files
-- Keep `serving/ray_serve/deployment.py` and `config.yaml` in sync
-- Update `serving/load_gen/locustfile.py` when endpoint shapes change
+Each backend lives in `serving/triton_backends/<backend_name>/`:
 
-## Rules
+```
+<backend_name>/
+  config.pbtxt      # backend declaration and tensor shapes
+  1/
+    model.py        # Triton Python backend implementation
+```
 
-- `config.pbtxt` max_batch_size must match the tensor shapes in `serving/load_gen/payloads/sample_batch.json`
-- Every backend directory must have a `config.pbtxt` and a `1/model.py`
-- Ray Serve deployments must expose a `/healthz` endpoint
-- Never put secrets (API keys, S3 credentials) in config.yaml — use `os.environ.get()` with a documented env var name
+Critical `config.pbtxt` field — use `backend: "python"`, **not** `backend: "pytorch"`:
 
-## Workflow
+```protobuf
+backend: "python"
+max_batch_size: 32
 
-1. Read `serving/CLAUDE.md`
-2. For backend changes: update `config.pbtxt` first, then `model.py`, then verify shapes match `sample_batch.json`
-3. For Ray Serve changes: update `deployment.py`, then `config.yaml`
-4. Test locally with `tritonserver --model-repository serving/triton_backends/` before pushing
+input [{ name: "INPUT" data_type: TYPE_FP32 dims: [ -1, 512 ] }]
+output [{ name: "OUTPUT" data_type: TYPE_FP32 dims: [ -1, 512 ] }]
+```
+
+## Ray Serve local cluster startup
+
+Ray Serve runs in **local mode** on HPC. Never call `ray.init(address="auto")` — it hangs waiting for a cluster head node.
+
+```python
+import ray
+from ray import serve
+
+ray.init()          # local mode — no address argument
+serve.start()
+```
+
+Start the stack:
+
+```bash
+python serving/ray_serve/deployment.py    # starts Ray + Serve locally
+```
+
+## Testing a backend without Ray
+
+Use the Triton Python client directly against a running `tritonserver`:
+
+```bash
+tritonserver --model-repository serving/triton_backends/ &
+python serving/load_gen/smoke_test.py     # direct tritonclient call, no Ray
+```
+
+## Common config.pbtxt mistakes
+
+| Mistake | Symptom | Fix |
+|---|---|---|
+| `backend: "pytorch"` | backend not found | Change to `backend: "python"` |
+| `max_batch_size` mismatch | shape error at runtime | Match value in `serving/load_gen/payloads/sample_batch.json` |
+| Missing `1/` directory | model load failure | Create `serving/triton_backends/<name>/1/model.py` |
+| Hardcoded secrets in `config.yaml` | credential leak | Use `os.environ.get("VAR")` and document the var name |
+
+## Key env vars
+
+| Var | Purpose |
+|---|---|
+| `TRITON_MODEL_REPO` | path to `serving/triton_backends/` |
+| `MLFLOW_TRACKING_URI` | MLflow server URI (on HPC: `file://$SCRATCH/mlruns`) |
+| `RAY_NUM_CPUS` | override CPU count for local Ray init |
+
+## Health checks
+
+Every Ray Serve deployment must expose a `/healthz` endpoint:
+
+```python
+@serve.deployment
+class MyDeployment:
+    async def __call__(self, request):
+        if request.url.path == "/healthz":
+            return {"status": "ok"}
+        ...
+```

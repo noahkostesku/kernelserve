@@ -2,60 +2,54 @@
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
-.Python
-*.egg-info/
-dist/
-build/
-*.egg
 .venv/
-venv/
-.env
-.env.local
-.env.*.local
+dist/
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
 
 # Rust
 target/
-Cargo.lock
+kernels/cuda_oxide/ptx/
+!kernels/cuda_oxide/ptx/.gitkeep
 
-# MLflow
-mlruns/
-.mlflow/
+# Claude
+.claude/worktrees/
+.claude/settings.local.json
+CLAUDE.local.md
 
-# SLURM artifacts
+# SLURM
+slurm/logs/
 *.out
 *.err
 
-# Triton GPU compiler cache and Triton Inference Server cache
+# MLflow
+experiments/runs/
+mlruns/
+
+# Observability data volumes
+observability/grafana/data/
+observability/prometheus/data/
+
+# Env files
+.env
+.env.cluster
+*.env
+
+# IDE
+.vscode/
+.idea/
+
+# Triton compiler cache — stale cache silently runs old kernel code, never commit it
 .triton/
 triton_cache/
 
-# Ray
-/tmp/ray/
+# Ray session artifacts
 ray_session_*/
 
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Editors
-.vscode/
-.idea/
+# macOS & editor noise
+.DS_Store
 *.swp
 *.swo
 *~
-.DS_Store
-Thumbs.db
-
-# Secrets
-*.pem
-*.key
-secrets/
-
-# Benchmark result files (summarise in MLflow / docs/ instead)
-*.csv
-*.json.bench
-criterion/
-
-# Claude local overrides
-CLAUDE.local.md

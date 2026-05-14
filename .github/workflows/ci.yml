@@ -1,13 +1,23 @@
 name: CI
 
+# Triggers on every push to any branch, and on PRs targeting main.
 on:
   push:
-    branches: [main, master]
   pull_request:
+    branches: [main]
+
+# Cancel an in-progress run for the same ref when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# NOTE: No GPU runners are used here.
+# Kernel correctness tests require a real A100 and run on HPC (Narval) via SLURM.
+# See slurm/bench_job.sh and docs/hpc-setup.md for instructions on HPC test runs.
 
 jobs:
-  python-lint:
-    name: Python lint & type-check
+  lint-python:
+    name: Python lint, format, & type-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,14 +32,40 @@ jobs:
       - name: Install dev dependencies
         run: uv sync --dev
 
-      - name: ruff check
+      - name: ruff check (linting)
         run: uv run ruff check .
 
-      - name: mypy
-        run: uv run mypy kernels/triton serving observability experiments --ignore-missing-imports
+      - name: ruff format --check (formatting)
+        run: uv run ruff format --check .
 
-  python-test:
-    name: Python tests (no GPU)
+      - name: mypy (type checking)
+        run: uv run mypy src/ --ignore-missing-imports
+
+  lint-rust:
+    name: Rust clippy & fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable with clippy and rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: cargo clippy -D warnings
+        working-directory: kernels/cuda_oxide
+        # cuda-oxide PTX compilation needs CUDA headers absent on GH runners.
+        # The ci_no_cuda cfg gate stubs out GPU-specific code so clippy can lint the rest.
+        run: cargo clippy --all-targets -- -D warnings
+        env:
+          RUSTFLAGS: "--cfg ci_no_cuda"
+
+      - name: cargo fmt --check
+        working-directory: kernels/cuda_oxide
+        run: cargo fmt --check
+
+  test-python:
+    name: Python unit tests (no GPU)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,25 +78,81 @@ jobs:
         run: pip install uv
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --dev
 
-      - name: Run tests (CPU-only)
-        run: uv run pytest -m "not gpu" --tb=short
+      - name: Run unit tests
+        # -x: stop on first failure; tests/unit/ only — integration & GPU tests run on HPC
+        run: uv run pytest tests/unit/ -x --tb=short --cov=. --cov-report=xml
 
-  rust-check:
-    name: Rust clippy
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          flags: unit
+          # Don't block the build if Codecov itself is down.
+          fail_ci_if_error: false
+
+  build-check:
+    name: Config & manifest validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate pyproject.toml
+        # tomllib is in the Python 3.11 stdlib — no extra install needed.
+        run: |
+          python - <<'EOF'
+          import tomllib, sys
+          try:
+              with open("pyproject.toml", "rb") as f:
+                  tomllib.load(f)
+              print("pyproject.toml: OK")
+          except Exception as e:
+              print(f"pyproject.toml: FAILED — {e}", file=sys.stderr)
+              sys.exit(1)
+          EOF
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
 
-      - name: clippy -D warnings
+      - name: Validate Cargo.toml
         working-directory: kernels/cuda_oxide
-        # cuda-oxide requires CUDA headers; check without GPU features for CI
-        run: cargo clippy --all-targets -- -D warnings
-        env:
-          RUSTFLAGS: "--cfg ci_no_cuda"
+        # --no-deps skips dependency resolution so this stays fast and offline.
+        run: cargo metadata --no-deps --format-version 1 > /dev/null
+
+      - name: Install tritonclient for protobuf definitions
+        # tritonclient[grpc] ships the compiled Triton ModelConfig protobuf, which lets
+        # us validate config.pbtxt files against the real schema rather than ad-hoc regexes.
+        run: pip install "tritonclient[grpc]"
+
+      - name: Validate config.pbtxt files
+        run: |
+          python - <<'EOF'
+          import sys, pathlib
+          from google.protobuf import text_format
+          from tritonclient.grpc import model_config_pb2
+
+          failed = []
+          configs = sorted(pathlib.Path(".").rglob("config.pbtxt"))
+          if not configs:
+              print("No config.pbtxt files found — skipping.")
+              sys.exit(0)
+
+          for pbtxt in configs:
+              try:
+                  text_format.Parse(pbtxt.read_text(), model_config_pb2.ModelConfig())
+                  print(f"  OK: {pbtxt}")
+              except Exception as e:
+                  print(f"  FAIL: {pbtxt} — {e}", file=sys.stderr)
+                  failed.append(str(pbtxt))
+
+          if failed:
+              print(f"\n{len(failed)} file(s) failed.", file=sys.stderr)
+              sys.exit(1)
+          else:
+              print("All config.pbtxt files parsed successfully.")
+          EOF

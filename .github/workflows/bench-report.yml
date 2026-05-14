@@ -1,26 +1,24 @@
 name: Benchmark Report
 
+# Triggered manually — supply the kernel name and the PR number to comment on.
+# This job reads from MLflow (results produced by HPC SLURM jobs) rather than
+# running kernels itself, so it needs no GPU runner.
 on:
   workflow_dispatch:
     inputs:
       kernel:
-        description: "Kernel name to benchmark (e.g. rms_norm)"
+        description: "Kernel name to report on (e.g. rms_norm)"
         required: true
-        default: "rms_norm"
-      batch_size:
-        description: "Batch size"
-        required: false
-        default: "8"
-      seq_len:
-        description: "Sequence length"
-        required: false
-        default: "512"
+      pr_number:
+        description: "PR number to post the benchmark comparison comment on"
+        required: true
 
 jobs:
-  benchmark:
-    name: Run benchmark on GPU runner
-    # TODO: replace with a self-hosted GPU runner label for Narval
-    runs-on: [self-hosted, gpu, a100]
+  report:
+    name: Pull MLflow results and post PR comment
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write   # gh pr comment needs write access to the PR
     steps:
       - uses: actions/checkout@v4
 
@@ -28,41 +26,25 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install uv
-        run: pip install uv
+      - name: Install Python dependencies
+        run: pip install mlflow pandas
 
-      - name: Install dependencies
-        run: uv sync
-
-      - name: Build Rust kernels
-        working-directory: kernels/cuda_oxide
-        run: cargo build --release
-
-      - name: Run benchmark
+      - name: Pull MLflow benchmark results
+        # pull_mlflow_results.py queries MLflow for the latest runs for the given kernel
+        # across all backends and writes a markdown comparison table to --output.
         run: |
-          uv run pytest tests/benchmark/ -m gpu \
-            -k "${{ github.event.inputs.kernel }}" \
-            --benchmark-json=/tmp/bench_results.json
-
-      - name: Log to MLflow
-        run: |
-          uv run python experiments/mlflow_setup.py log \
+          python experiments/scripts/pull_mlflow_results.py \
             --kernel "${{ github.event.inputs.kernel }}" \
-            --results /tmp/bench_results.json \
-            --commit "${{ github.sha }}"
+            --output /tmp/bench_table.md
+        env:
+          # Set MLFLOW_TRACKING_URI in repo secrets; on HPC this is file://$SCRATCH/mlruns
+          # but CI needs a reachable URI (e.g. a hosted MLflow server or S3-backed store).
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
 
-      - name: Post results as PR comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const results = JSON.parse(fs.readFileSync('/tmp/bench_results.json', 'utf8'));
-            const body = `## Benchmark Results — \`${{ github.event.inputs.kernel }}\`\n\n` +
-              `Commit: \`${{ github.sha }}\`\n\n` +
-              `\`\`\`\n${JSON.stringify(results.benchmarks?.slice(0,5), null, 2)}\n\`\`\``;
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body
-            });
+      - name: Post comparison table as PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ github.event.inputs.pr_number }}" \
+            --body-file /tmp/bench_table.md \
+            --repo "${{ github.repository }}"

@@ -1,0 +1,37 @@
+# Curated list of modules available on Narval (Alliance Canada).
+# Add a new entry here when a new module is verified to exist on the cluster.
+# Run `module avail` on Narval to check available versions.
+# Keep entries sorted alphabetically within each section.
+
+# --- Base environment ---
+StdEnv/2023
+
+# --- Compilers ---
+gcc/12.3
+intel/2023.2.1
+
+# --- CUDA & GPU ---
+cuda/12.2
+cudacore/.12.2.2
+cudnn/9.2.1.18
+
+# --- Languages & runtimes ---
+python/3.11
+python/3.12
+rust/1.91.0
+
+# --- MPI & parallel ---
+openmpi/4.1.5
+
+# --- Libraries ---
+hdf5/1.14.2
+netcdf/4.9.2
+fftw/3.3.10
+flexiblas/3.3.1
+imkl/2023.2.0
+llvm/18.1.8
+
+# --- Utilities ---
+git/2.42.0
+cmake/3.27.7
+ninja/1.11.1

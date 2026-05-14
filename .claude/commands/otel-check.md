@@ -1,34 +1,71 @@
 ---
-description: Verify the OpenTelemetry collector is running and traces are flowing from the serving layer
+description: Verify the observability stack is running and receiving data
 argument-hint: [--endpoint http://localhost:4317]
 allowed-tools: [Bash, Read]
 ---
 
-# /otel-check — OpenTelemetry Health Check
+# /otel-check — Observability Stack Health Check
 
 ## Steps
 
-1. Parse optional `--endpoint` from $ARGUMENTS (default: `http://localhost:4317`)
-2. Check if the OTel collector process is running:
+1. Check Jaeger at `localhost:16686`:
    ```bash
-   pgrep -f otelcol || echo "Collector not running"
+   curl -s --max-time 3 http://localhost:16686 -o /dev/null -w "%{http_code}"
    ```
-3. Validate the collector config:
+   Record ✓ if HTTP 200, ✗ otherwise.
+
+2. Check Prometheus at `localhost:9090`:
    ```bash
-   cat observability/otel/collector.yaml
+   curl -s --max-time 3 http://localhost:9090/-/healthy
    ```
-4. Send a test span:
+   Record ✓ if response is `Prometheus Server is Healthy.`, ✗ otherwise.
+
+3. Check Grafana at `localhost:3000`:
+   ```bash
+   curl -s --max-time 3 http://localhost:3000/api/health | python3 -m json.tool
+   ```
+   Record ✓ if `"database": "ok"` is in the response, ✗ otherwise.
+
+4. Send a test span via the OTel SDK:
    ```bash
    python3 -c "
-   from observability.otel.instrumentation import create_tracer
-   tracer = create_tracer('otel-check')
+   from opentelemetry import trace
+   from opentelemetry.sdk.trace import TracerProvider
+   from opentelemetry.sdk.trace.export import BatchSpanProcessor
+   from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+   provider = TracerProvider()
+   provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint='http://localhost:4317', insecure=True)))
+   trace.set_tracer_provider(provider)
+   tracer = trace.get_tracer('otel-check')
    with tracer.start_as_current_span('health-check') as span:
        span.set_attribute('check.status', 'ok')
-   print('Test span sent')
+   provider.force_flush()
+   print('span sent')
    "
    ```
-5. Query Prometheus for the `kernelserve_kernel_latency_seconds` metric:
+   Then confirm the span appears in Jaeger:
    ```bash
-   curl -s 'http://localhost:9090/api/v1/query?query=kernelserve_kernel_latency_seconds' | python3 -m json.tool | head -20
+   curl -s 'http://localhost:16686/api/traces?service=otel-check&limit=1' | python3 -m json.tool | head -10
    ```
-6. Report: collector running (yes/no) | test span sent (yes/no) | Prometheus metric present (yes/no)
+   Record ✓ if a trace is returned, ✗ if the result is empty.
+
+5. Query Prometheus for the most recent `kernelserve_request_latency_ms` sample:
+   ```bash
+   curl -s 'http://localhost:9090/api/v1/query?query=kernelserve_request_latency_ms' | python3 -m json.tool
+   ```
+   Record ✓ if at least one result is returned, ✗ if the result list is empty.
+
+6. Print a health table:
+
+   ```
+   Component   | Endpoint                | Status
+   ------------|-------------------------|-------
+   Jaeger      | localhost:16686         | ✓/✗
+   Prometheus  | localhost:9090          | ✓/✗
+   Grafana     | localhost:3000          | ✓/✗
+   Test span   | Jaeger trace confirmed  | ✓/✗
+   Metric      | request_latency_ms      | ✓/✗
+   ```
+
+   If any component shows ✗, print the raw error output below the table.
