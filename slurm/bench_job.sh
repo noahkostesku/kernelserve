@@ -13,27 +13,26 @@
 set -euo pipefail
 
 # ── Environment ──────────────────────────────────────────────────────────────
-module load StdEnv/2023 gcc/12.3 cuda/12.2 rust/1.91.0 python/3.11
+module load StdEnv/2023 gcc/12.3 cuda/12.2 llvm/18.1.8 rust/1.91.0 python/3.11
 
 export LD_LIBRARY_PATH=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Core/cudacore/12.2.2/lib64:${LD_LIBRARY_PATH:-}
 export MLFLOW_TRACKING_URI="file://$SCRATCH/mlruns"
 
 REPO_DIR="$HOME/projects/def-cbravo/$USER/kernelserve"
-VENV_DIR="$SCRATCH/kernelserve-venv"
 
 # ── Activate Python venv ─────────────────────────────────────────────────────
-if [[ ! -d "$VENV_DIR" ]]; then
-    echo "ERROR: venv not found at $VENV_DIR. Run scripts/setup_env.sh first." >&2
+if [[ ! -d "$REPO_DIR/.venv" ]]; then
+    echo "ERROR: venv not found at $REPO_DIR/.venv. Run: python -m venv .venv && uv sync" >&2
     exit 1
 fi
-source "$VENV_DIR/bin/activate"
+source "$REPO_DIR/.venv/bin/activate"
 
 cd "$REPO_DIR"
 
 # ── Build Rust kernels ────────────────────────────────────────────────────────
 echo "=== Building cuda-oxide kernels ==="
 cd kernels/cuda_oxide
-cargo build --release
+cargo oxide build --release
 cd "$REPO_DIR"
 
 # ── Run benchmark suite ───────────────────────────────────────────────────────
