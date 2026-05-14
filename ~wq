@@ -22,12 +22,12 @@
       "Edit(scripts/**)",
       "Edit(docs/**)",
       "Edit(.claude/**)",
-      "Bash(cargo:*)",
+      "Bash(cargo:*)",       // includes `cargo oxide build`
       "Bash(pytest:*)",
       "Bash(ruff:*)",
       "Bash(mypy:*)",
-      "Bash(uv:*)",
-      "Bash(bash -n *)",
+      "Bash(uv:*)",          // uv run / uv sync / uv lock — not pip install
+      "Bash(bash -n *)",     // syntax-check SLURM scripts without running them
       "Bash(python3:*)",
       "Bash(python:*)",
       "Bash(find:*)",
@@ -123,7 +123,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cmd=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('command',''))\" 2>/dev/null || echo ''); if echo \"$cmd\" | grep -q 'cargo oxide build'; then echo ''; echo '=== PTX kernel sizes (kernels/cuda_oxide/ptx/) ==='; ptx_files=$(find kernels/cuda_oxide/ptx -name '*.ptx' 2>/dev/null | sort); if [ -n \"$ptx_files\" ]; then echo \"$ptx_files\" | while IFS= read -r f; do printf '%10d B  %s\\n' \"$(wc -c < \"$f\")\" \"$f\"; done; else echo '  (no .ptx files \u2014 verify the build completed and PTX output is enabled)'; fi; echo ''; fi"
+            "command": "cmd=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('command',''))\" 2>/dev/null || echo ''); if echo \"$cmd\" | grep -q 'cargo oxide build'; then echo ''; echo '=== PTX kernel sizes (kernels/cuda_oxide/ptx/) ==='; ptx_files=$(find kernels/cuda_oxide/ptx -name '*.ptx' 2>/dev/null | sort); if [ -n \"$ptx_files\" ]; then echo \"$ptx_files\" | while IFS= read -r f; do printf '%10d B  %s\\n' \"$(wc -c < \"$f\")\" \"$f\"; done; else echo '  (no .ptx files — verify the build completed and PTX output is enabled)'; fi; echo ''; fi"
           }
         ]
       }
@@ -133,7 +133,27 @@
         "hooks": [
           {
             "type": "command",
-            "command": "prompt=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('prompt',''))\" 2>/dev/null || echo ''); if echo \"$prompt\" | grep -qiE '\\bbench(mark)?s?\\b'; then printf '[Auto-injected \u2014 benchmark keyword detected]\\nLog all results to MLflow before the task is considered complete:\\n  Experiment format (all 5 segments required):\\n    kernelserve/<kernel>/<backend>/<cluster>/YYYY-MM\\n    e.g. kernelserve/rms_norm/cuda_oxide/narval/2026-05\\n  Required tag: mlflow.set_tag(\"git_sha\", subprocess.check_output([\"git\",\"rev-parse\",\"--short\",\"HEAD\"]).decode())\\n  MLflow URI on HPC: file://$SCRATCH/mlruns\\n'; fi"
+            "command": "prompt=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('prompt',''))\" 2>/dev/null || echo ''); if echo \"$prompt\" | grep -qiE '\\bbench(mark)?s?\\b'; then printf '[Auto-injected — benchmark keyword detected]\\nLog all results to MLflow before the task is considered complete:\\n  Experiment format (all 5 segments required):\\n    kernelserve/<kernel>/<backend>/<cluster>/YYYY-MM\\n    e.g. kernelserve/rms_norm/cuda_oxide/narval/2026-05\\n  Required tag: mlflow.set_tag(\"git_sha\", subprocess.check_output([\"git\",\"rev-parse\",\"--short\",\"HEAD\"]).decode())\\n  MLflow URI on HPC: file://$SCRATCH/mlruns\\n'; fi"
+          }
+        ]
+      }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "wt=$(echo \"$CLAUDE_TOOL_INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get('worktree_path',''))\" 2>/dev/null || echo ''); if [ -n \"$wt\" ]; then [ -f .env ] && cp -n .env \"$wt/.env\" && echo \"Copied .env -> $wt/.env\"; mkdir -p \"$wt/slurm\"; [ -f slurm/.env.cluster ] && cp -n slurm/.env.cluster \"$wt/slurm/.env.cluster\" && echo \"Copied slurm/.env.cluster -> $wt/slurm/.env.cluster\"; fi"
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git worktree prune && echo 'git worktree prune complete'"
           }
         ]
       }
