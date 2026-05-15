@@ -58,7 +58,7 @@ jobs:
         # of rust-toolchain.toml, so clippy fails unless nightly is installed too.
         # rust-src and rustc-dev are required by rustc-codegen-cuda's proc-macros.
         run: |
-          rustup toolchain install nightly-2026-04-03 --component clippy rustfmt rust-src rustc-dev
+          rustup toolchain install nightly-2026-04-03 --component clippy --component rustfmt --component rust-src --component rustc-dev
           rustup override set nightly-2026-04-03
 
       - name: cargo clippy -D warnings
@@ -94,7 +94,7 @@ jobs:
 
       - name: Run unit tests
         # -x: stop on first failure; tests/unit/ only — integration & GPU tests run on HPC
-        run: uv run pytest tests/unit/ -x --tb=short --cov=. --cov-report=xml
+        run: uv run pytest tests/unit/ -x --tb=short
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
