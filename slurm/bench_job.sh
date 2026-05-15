@@ -34,7 +34,8 @@ export CUDA_OXIDE_BACKEND=/scratch/noahkost/cuda-oxide/crates/rustc-codegen-cuda
 export RUSTFLAGS="-L $HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib"
 export LD_LIBRARY_PATH=$HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib:/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Core/cudacore/12.2.2/lib64:${LD_LIBRARY_PATH:-}
 export LIBCLANG_PATH=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/clang/18.1.8/lib
-cargo oxide run --arch sm_80
+export CUDA_OXIDE_LLC=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/llvmcore/21.1.5/bin/llc
+cargo oxide run --arch sm_80 --verbose
 cd "$REPO_DIR"
 
 # ── Run benchmark suite ───────────────────────────────────────────────────────
