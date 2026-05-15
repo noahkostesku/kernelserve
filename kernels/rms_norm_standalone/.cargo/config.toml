@@ -1,0 +1,7 @@
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+# Path is relative to this file's directory (.cargo/).
+# Points to the shared vendor tree populated by `cargo vendor` in kernels/cuda_oxide/.
+directory = "../../cuda_oxide/vendor"

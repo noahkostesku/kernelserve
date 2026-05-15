@@ -1,0 +1,4 @@
+[toolchain]
+# Matches cuda-oxide's pinned nightly (required by cuda-core's #![feature(f16)]
+# and the rustc-codegen-cuda PTX backend used by `cargo oxide run --arch sm_80`).
+channel = "nightly-2026-04-03"
