@@ -52,9 +52,21 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Install nightly-2026-04-03 with clippy, rustfmt, rust-src, rustc-dev
+        # rust-toolchain.toml at the repo root pins the whole repo to this nightly.
+        # dtolnay/rust-toolchain@stable installs stable but cargo ignores it in favour
+        # of rust-toolchain.toml, so clippy fails unless nightly is installed too.
+        # rust-src and rustc-dev are required by rustc-codegen-cuda's proc-macros.
+        run: |
+          rustup toolchain install nightly-2026-04-03 --component clippy rustfmt rust-src rustc-dev
+          rustup override set nightly-2026-04-03
+
       - name: cargo clippy -D warnings
         working-directory: kernels/cuda_oxide
-        # cuda-oxide PTX compilation needs CUDA headers absent on GH runners.
+        # Runs from kernels/cuda_oxide, NOT kernels/rms_norm_standalone.
+        # rms_norm_standalone has its own isolated [workspace] + nightly rust-toolchain.toml
+        # and requires CUDA hardware + the full cuda-oxide backend — it cannot be linted
+        # in a standard CI runner.
         # The ci_no_cuda cfg gate stubs out GPU-specific code so clippy can lint the rest.
         run: cargo clippy --all-targets -- -D warnings
         env:
