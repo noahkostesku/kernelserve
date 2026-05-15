@@ -4,7 +4,7 @@
 //! `cargo oxide`. No PTX file path, no env-var, no cfg splits.
 //!
 //! Build and run:
-//!   cargo oxide run rms_norm
+//!   cargo oxide run --arch sm_80
 
 use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
 use cuda_device::{DisjointSlice, SharedArray, cuda_module, kernel, thread, warp};
@@ -12,7 +12,8 @@ use ndarray::{Array1, Array2};
 use ndarray_npy::NpzReader;
 use std::fs::File;
 
-const FIXTURE: &str = "tests/fixtures/rms_norm_4x4096.npz";
+// Fixture lives in the sibling library crate; path is relative to crate root.
+const FIXTURE: &str = "../cuda_oxide/tests/fixtures/rms_norm_4x4096.npz";
 /// Epsilon for numerical stability inside the kernel.
 const KERNEL_EPS: f32 = 1e-5;
 /// Correctness threshold: max abs error vs. PyTorch reference (fp32).

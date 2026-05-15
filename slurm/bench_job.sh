@@ -29,12 +29,12 @@ cd "$REPO_DIR"
 
 # ── Build and run rms-norm correctness binary ─────────────────────────────────
 echo "=== Running rms-norm correctness binary ==="
-cd kernels/cuda_oxide
+cd kernels/rms_norm_standalone
 export CUDA_OXIDE_BACKEND=/scratch/noahkost/cuda-oxide/crates/rustc-codegen-cuda/target/release/librustc_codegen_cuda.so
 export RUSTFLAGS="-L $HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib"
 export LD_LIBRARY_PATH=$HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib:/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Core/cudacore/12.2.2/lib64:${LD_LIBRARY_PATH:-}
 export LIBCLANG_PATH=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/clang/18.1.8/lib
-cargo oxide run rms_norm
+cargo oxide run --arch sm_80
 cd "$REPO_DIR"
 
 # ── Run benchmark suite ───────────────────────────────────────────────────────

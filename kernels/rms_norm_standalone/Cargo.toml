@@ -1,0 +1,20 @@
+[package]
+name        = "rms_norm"
+version     = "0.1.0"
+edition     = "2021"
+description = "cuda-oxide standalone correctness binary for RMS-Norm (sm_80 A100)"
+publish     = false
+
+[workspace]  # isolate from any parent workspace
+
+[dependencies]
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide", rev = "f819f23fe035ec1c24b8ec06e738b62a9f377140" }
+cuda-host   = { git = "https://github.com/NVlabs/cuda-oxide", rev = "f819f23fe035ec1c24b8ec06e738b62a9f377140" }
+cuda-core   = { git = "https://github.com/NVlabs/cuda-oxide", rev = "f819f23fe035ec1c24b8ec06e738b62a9f377140" }
+ndarray     = "0.16"
+ndarray-npy = "0.9"
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
