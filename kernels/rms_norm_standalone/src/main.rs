@@ -7,7 +7,7 @@
 //!   cargo oxide run --arch sm_80
 
 use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
-use cuda_device::{DisjointSlice, SharedArray, cuda_module, kernel, thread, warp};
+use cuda_device::{DisjointSlice, SharedArray, cuda_module, device, kernel, thread, warp};
 use ndarray::{Array1, Array2};
 use ndarray_npy::NpzReader;
 use std::fs::File;
@@ -18,6 +18,29 @@ const FIXTURE: &str = "../cuda_oxide/tests/fixtures/rms_norm_4x4096.npz";
 const KERNEL_EPS: f32 = 1e-5;
 /// Correctness threshold: max abs error vs. PyTorch reference (fp32).
 const MAX_ABS_ERR: f32 = 1e-4;
+
+// =============================================================================
+// DEVICE HELPER — compiled to PTX alongside the kernel
+// =============================================================================
+
+/// Approximates 1/sqrt(x) using Carmack's fast inverse square root + two
+/// Newton-Raphson steps. Relative error ≈ 4.7e-7 — well inside the 1e-4
+/// absolute threshold.
+///
+/// Uses only integer bitcast (`to_bits`/`from_bits`) and f32 mul/add.
+/// `f32::sqrt()` calls `core::intrinsics::sqrtf32` which the codegen routes
+/// to libdevice (`__nv_sqrtf`), forcing NVVM IR output and breaking the
+/// embedded-PTX path. This helper avoids that entirely.
+#[device]
+fn rsqrt_approx(x: f32) -> f32 {
+    let xhalf = 0.5_f32 * x;
+    // Carmack magic-constant initial guess for 1/sqrt(x)
+    let i = 0x5f3759df_u32.wrapping_sub(x.to_bits() >> 1);
+    let y = f32::from_bits(i);
+    // Two Newton-Raphson refinements: y_{n+1} = y_n * (1.5 - xhalf * y_n²)
+    let y = y * (1.5_f32 - xhalf * y * y);
+    y * (1.5_f32 - xhalf * y * y)
+}
 
 // =============================================================================
 // KERNEL — compiled to PTX by rustc-codegen-cuda
@@ -87,7 +110,7 @@ mod kernels {
                 // PARTIAL are globally visible before this read.
                 PARTIAL[0] + PARTIAL[1] + PARTIAL[2] + PARTIAL[3]
             };
-            let rms_inv = 1.0_f32 / (total / hidden_dim as f32 + eps).sqrt();
+            let rms_inv = rsqrt_approx(total / hidden_dim as f32 + eps);
             unsafe {
                 // SAFETY: only thread 0 writes RMS_INV[0]; all other threads read it
                 // after the next sync_threads().
