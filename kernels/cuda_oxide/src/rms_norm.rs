@@ -1,5 +1,9 @@
 //! RMS Normalization kernel (sm_80, A100).
 //!
+//! DEPRECATED: This file uses the split cfg/PTX-file pattern. The canonical
+//! implementation is `src/bin/rms_norm.rs`, which uses unified cuda-oxide
+//! compilation (PTX embedded at build time, no env-var, no cfg splits).
+//!
 //! Implements: `y = x / sqrt(mean(x²) + eps) * weight`
 //!
 //! References:

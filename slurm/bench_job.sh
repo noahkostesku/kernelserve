@@ -27,18 +27,14 @@ source "$REPO_DIR/.venv/bin/activate"
 
 cd "$REPO_DIR"
 
-# ── Build Rust kernels ────────────────────────────────────────────────────────
-echo "=== Building cuda-oxide kernels ==="
+# ── Build and run rms-norm correctness binary ─────────────────────────────────
+echo "=== Running rms-norm correctness binary ==="
 cd kernels/cuda_oxide
 export CUDA_OXIDE_BACKEND=/scratch/noahkost/cuda-oxide/crates/rustc-codegen-cuda/target/release/librustc_codegen_cuda.so
 export RUSTFLAGS="-L $HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib"
 export LD_LIBRARY_PATH=$HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib:/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Core/cudacore/12.2.2/lib64:${LD_LIBRARY_PATH:-}
 export LIBCLANG_PATH=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/clang/18.1.8/lib
-cargo oxide build
-
-echo "=== Running Rust correctness test ==="
-export KERNELSERVE_PTX=/scratch/noahkost/kernelserve/kernels/cuda_oxide/ptx/kernelserve-kernels.ptx
-cargo test --test correctness --features gpu -- --ignored
+cargo oxide run rms_norm
 cd "$REPO_DIR"
 
 # ── Run benchmark suite ───────────────────────────────────────────────────────
