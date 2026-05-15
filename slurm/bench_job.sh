@@ -23,6 +23,7 @@ if [[ ! -d "$REPO_DIR/.venv" ]]; then
     echo "ERROR: venv not found at $REPO_DIR/.venv. Run: python -m venv .venv && uv sync" >&2
     exit 1
 fi
+# shellcheck source=/dev/null
 source "$REPO_DIR/.venv/bin/activate"
 
 cd "$REPO_DIR"
