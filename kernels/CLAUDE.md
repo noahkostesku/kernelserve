@@ -2,7 +2,7 @@
 
 | Kernel | File | Status |
 |---|---|---|
-| rms_norm | `cuda_oxide/src/rms_norm.rs` | stub |
+| rms_norm | `cuda_oxide/src/rms_norm.rs` | complete |
 | fused_attn | `cuda_oxide/src/fused_attn.rs` | stub |
 
 Update this table when adding or completing a kernel.
