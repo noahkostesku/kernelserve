@@ -100,7 +100,11 @@ def bench_cuda_oxide(batch: int, hidden_dim: int) -> BenchResult:
         text=True,
         check=True,
     )
-    data: dict[str, float] = json.loads(result.stdout.strip())
+    json_line = next(
+        line for line in result.stdout.splitlines()
+        if line.strip().startswith("{")
+    )
+    data: dict[str, float] = json.loads(json_line)
     p50 = float(data["p50_us"])
     p99 = float(data["p99_us"])
     gbs = float(data["throughput_gbs"])

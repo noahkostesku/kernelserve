@@ -6,18 +6,18 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-node=a100:1
 #SBATCH --mem=32G
-#SBATCH --time=0-02:00
+#SBATCH --time=0-00:45:00
 #SBATCH --output=/scratch/%u/kernelserve-logs/%j-out.txt
 #SBATCH --error=/scratch/%u/kernelserve-logs/%j-err.txt
 
 set -euo pipefail
 
 # ── Environment ──────────────────────────────────────────────────────────────
-module load StdEnv/2023 gcc/12.3 cuda/12.2 llvm/18.1.8 clang/18.1.8 rust/1.91.0 python/3.11
+module load StdEnv/2023 gcc/12.3 cuda/12.9 llvm/18.1.8 clang/18.1.8 rust/1.91.0 python/3.11
 export PATH=$HOME/.cargo/bin:$HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/bin:$PATH
 export CUDA_OXIDE_BACKEND=$SCRATCH/cuda-oxide/crates/rustc-codegen-cuda/target/release/librustc_codegen_cuda.so
 export RUSTFLAGS="-L $HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib"
-export LD_LIBRARY_PATH=$HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib:/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Core/cudacore/12.2.2/lib64:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=$HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib:/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Core/cudacore/12.9.1/lib64:${LD_LIBRARY_PATH:-}
 export LIBCLANG_PATH=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/clang/18.1.8/lib
 export CUDA_OXIDE_LLC=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/llvmcore/21.1.5/bin/llc
 export MLFLOW_TRACKING_URI="file://$SCRATCH/mlruns"
@@ -43,10 +43,10 @@ cd "$REPO_DIR"
 # ── Build release binary (used by bench_rms_norm.py via subprocess) ───────────
 echo "=== Building rms-norm release binary ==="
 cd "$REPO_DIR/kernels/rms_norm_standalone"
-cargo oxide build --release --arch "${CUDA_ARCH:-sm_80}"
+cargo oxide build --arch "${CUDA_ARCH:-sm_80}"
 cd "$REPO_DIR"
 
-export CUDA_OXIDE_BIN="$REPO_DIR/kernels/rms_norm_standalone/target/release/rms_norm_standalone"
+export CUDA_OXIDE_BIN="$REPO_DIR/kernels/rms_norm_standalone/target/release/rms_norm"
 
 # ── Run Phase 2 benchmark: 3 backends × 3 shapes → MLflow ────────────────────
 echo "=== Phase 2 benchmark (3 backends × 3 shapes) ==="
