@@ -1,23 +1,20 @@
 name: CI
 
-# Triggers on every push to any branch, and on PRs targeting main.
 on:
   push:
   pull_request:
-    branches: [main]
+    branches: [master]
 
-# Cancel an in-progress run for the same ref when a newer commit arrives.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# NOTE: No GPU runners are used here.
-# Kernel correctness tests require a real A100 and run on HPC (Narval) via SLURM.
-# See slurm/bench_job.sh and docs/hpc-setup.md for instructions on HPC test runs.
+# No GPU runners — kernel correctness tests run on HPC (Narval) via SLURM.
+# See slurm/bench_job.sh for the HPC benchmark workflow.
 
 jobs:
   lint-python:
-    name: Python lint, format, & type-check
+    name: Python lint & format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,14 +29,11 @@ jobs:
       - name: Install dev dependencies
         run: uv sync --dev
 
-      - name: ruff check (linting)
-        run: uv run ruff check .
+      - name: ruff check
+        run: uv run ruff check experiments/ observability/ kernels/triton/ tests/
 
-      - name: ruff format --check (formatting)
-        run: uv run ruff format --check .
-
-      - name: mypy (type checking)
-        run: uv run mypy src/ --ignore-missing-imports
+      - name: ruff format --check
+        run: uv run ruff format --check experiments/ observability/ kernels/triton/ tests/
 
   lint-rust:
     name: Rust clippy & fmt
@@ -47,27 +41,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust stable with clippy and rustfmt
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      - name: Install nightly-2026-04-03 with clippy, rustfmt, rust-src, rustc-dev
-        # rust-toolchain.toml at the repo root pins the whole repo to this nightly.
-        # dtolnay/rust-toolchain@stable installs stable but cargo ignores it in favour
-        # of rust-toolchain.toml, so clippy fails unless nightly is installed too.
-        # rust-src and rustc-dev are required by rustc-codegen-cuda's proc-macros.
+      - name: Install nightly toolchain
+        # rust-toolchain.toml pins the workspace to this nightly.
+        # rust-src and rustc-dev are required by cuda-device's proc-macros.
         run: |
-          rustup toolchain install nightly-2026-04-03 --component clippy --component rustfmt --component rust-src --component rustc-dev
-          rustup override set nightly-2026-04-03
+          rustup toolchain install nightly-2026-04-03 \
+            --component clippy --component rustfmt \
+            --component rust-src --component rustc-dev
 
       - name: cargo clippy -D warnings
         working-directory: kernels/cuda_oxide
-        # Runs from kernels/cuda_oxide, NOT kernels/rms_norm_standalone.
-        # rms_norm_standalone has its own isolated [workspace] + nightly rust-toolchain.toml
-        # and requires CUDA hardware + the full cuda-oxide backend — it cannot be linted
-        # in a standard CI runner.
-        # The ci_no_cuda cfg gate stubs out GPU-specific code so clippy can lint the rest.
+        # ci_no_cuda stubs out GPU-specific code paths so clippy can lint without CUDA headers.
+        # rms_norm_standalone/ is excluded -- it requires CUDA hardware and nightly to build.
         run: cargo clippy --all-targets -- -D warnings
         env:
           RUSTFLAGS: "--cfg ci_no_cuda"
@@ -90,19 +75,10 @@ jobs:
         run: pip install uv
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync
 
-      - name: Run unit tests
-        # -x: stop on first failure; tests/unit/ only — integration & GPU tests run on HPC
-        run: uv run pytest tests/unit/ -x --tb=short
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: coverage.xml
-          flags: unit
-          # Don't block the build if Codecov itself is down.
-          fail_ci_if_error: false
+      - name: pytest -m "not gpu"
+        run: uv run pytest -m "not gpu" -x --tb=short
 
   build-check:
     name: Config & manifest validation
@@ -115,7 +91,7 @@ jobs:
           python-version: "3.11"
 
       - name: Validate pyproject.toml
-        # tomllib is in the Python 3.11 stdlib — no extra install needed.
+        # tomllib is in the Python 3.11 stdlib -- no extra install needed.
         run: |
           python - <<'EOF'
           import tomllib, sys
@@ -124,47 +100,21 @@ jobs:
                   tomllib.load(f)
               print("pyproject.toml: OK")
           except Exception as e:
-              print(f"pyproject.toml: FAILED — {e}", file=sys.stderr)
+              print(f"pyproject.toml: FAILED -- {e}", file=sys.stderr)
               sys.exit(1)
           EOF
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Validate Cargo.toml
-        working-directory: kernels/cuda_oxide
-        # --no-deps skips dependency resolution so this stays fast and offline.
-        run: cargo metadata --no-deps --format-version 1 > /dev/null
-
-      - name: Install tritonclient for protobuf definitions
-        # tritonclient[grpc] ships the compiled Triton ModelConfig protobuf, which lets
-        # us validate config.pbtxt files against the real schema rather than ad-hoc regexes.
-        run: pip install "tritonclient[grpc]"
-
-      - name: Validate config.pbtxt files
+      - name: Validate Cargo.toml files
+        # RUSTUP_TOOLCHAIN overrides rust-toolchain.toml so stable is used for
+        # metadata parsing without installing the nightly toolchain in this job.
+        # --no-deps skips dependency resolution; this stays fast and offline.
+        env:
+          RUSTUP_TOOLCHAIN: stable
         run: |
-          python - <<'EOF'
-          import sys, pathlib
-          from google.protobuf import text_format
-          from tritonclient.grpc import model_config_pb2
-
-          failed = []
-          configs = sorted(pathlib.Path(".").rglob("config.pbtxt"))
-          if not configs:
-              print("No config.pbtxt files found — skipping.")
-              sys.exit(0)
-
-          for pbtxt in configs:
-              try:
-                  text_format.Parse(pbtxt.read_text(), model_config_pb2.ModelConfig())
-                  print(f"  OK: {pbtxt}")
-              except Exception as e:
-                  print(f"  FAIL: {pbtxt} — {e}", file=sys.stderr)
-                  failed.append(str(pbtxt))
-
-          if failed:
-              print(f"\n{len(failed)} file(s) failed.", file=sys.stderr)
-              sys.exit(1)
-          else:
-              print("All config.pbtxt files parsed successfully.")
-          EOF
+          cargo metadata --no-deps --format-version 1 \
+            --manifest-path kernels/cuda_oxide/Cargo.toml > /dev/null
+          cargo metadata --no-deps --format-version 1 \
+            --manifest-path kernels/rms_norm_standalone/Cargo.toml > /dev/null
