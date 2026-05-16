@@ -1,8 +1,7 @@
 name: Benchmark Report
 
-# Triggered manually — supply the kernel name and the PR number to comment on.
-# This job reads from MLflow (results produced by HPC SLURM jobs) rather than
-# running kernels itself, so it needs no GPU runner.
+# Triggered manually -- supply the kernel name and the PR number to comment on.
+# Reads from MLflow (results produced by HPC SLURM jobs); no GPU runner needed.
 on:
   workflow_dispatch:
     inputs:
@@ -18,7 +17,7 @@ jobs:
     name: Pull MLflow results and post PR comment
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write   # gh pr comment needs write access to the PR
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -37,8 +36,8 @@ jobs:
             --kernel "${{ github.event.inputs.kernel }}" \
             --output /tmp/bench_table.md
         env:
-          # Set MLFLOW_TRACKING_URI in repo secrets; on HPC this is file://$SCRATCH/mlruns
-          # but CI needs a reachable URI (e.g. a hosted MLflow server or S3-backed store).
+          # Set MLFLOW_TRACKING_URI in repo secrets. On HPC this is file://$SCRATCH/mlruns;
+          # CI needs a reachable URI (e.g. a hosted MLflow server or S3-backed store).
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
 
       - name: Post comparison table as PR comment
