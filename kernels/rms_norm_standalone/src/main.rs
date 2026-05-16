@@ -173,49 +173,70 @@ mod kernels {
 // HOST CODE — compiled to native x86_64 by LLVM
 // =============================================================================
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = parse_args().map_err(|e| format!("arg error: {e}"))?;
+/// CPU reference for correctness checks when the fixture shape doesn't match.
+fn rms_norm_cpu(input: &[f32], weight: &[f32], batch: usize, hidden: usize, eps: f32) -> Vec<f32> {
+    let mut out = vec![0.0_f32; batch * hidden];
+    for row in 0..batch {
+        let base = row * hidden;
+        let sum_sq: f32 = input[base..base + hidden].iter().map(|&x| x * x).sum();
+        let rms_inv = 1.0_f32 / (sum_sq / hidden as f32 + eps).sqrt();
+        for col in 0..hidden {
+            out[base + col] = input[base + col] * rms_inv * weight[col];
+        }
+    }
+    out
+}
 
-    // Load fixture — correctness check always runs as a gate before bench.
-    let f = File::open(FIXTURE).map_err(|e| format!("fixture not found at {FIXTURE}: {e}"))?;
-    let mut npz = NpzReader::new(f)?;
-    let input: Array2<f32> = npz.by_name("input.npy")?;
-    let weight: Array1<f32> = npz.by_name("weight.npy")?;
-    let reference: Array2<f32> = npz.by_name("output.npy")?;
-
-    let fix_batch = input.nrows();
-    let fix_hidden = input.ncols();
-    let (input_vec, _) = input.into_raw_vec_and_offset();
-    let (weight_vec, _) = weight.into_raw_vec_and_offset();
-    let (reference_vec, _) = reference.into_raw_vec_and_offset();
-
-    let ctx = CudaContext::new(0).map_err(|e| format!("CUDA context: {e}"))?;
-    let stream = ctx.default_stream();
-    let module = kernels::load(&ctx).map_err(|e| format!("PTX load: {e}"))?;
-
-    let input_dev = DeviceBuffer::from_host(&stream, &input_vec).map_err(|e| format!("alloc: {e}"))?;
-    let weight_dev = DeviceBuffer::from_host(&stream, &weight_vec).map_err(|e| format!("alloc: {e}"))?;
-    let mut output_dev = DeviceBuffer::<f32>::zeroed(&stream, input_vec.len()).map_err(|e| format!("alloc: {e}"))?;
-
-    let fix_cfg = LaunchConfig { grid_dim: (fix_batch as u32, 1, 1), block_dim: (128, 1, 1), shared_mem_bytes: 0 };
-    module.rms_norm_kernel(&stream, fix_cfg, &input_dev, &weight_dev, &mut output_dev, KERNEL_EPS, fix_hidden as u32)
-        .map_err(|e| format!("kernel: {e}"))?;
-
-    let output_vec = output_dev.to_host_vec(&stream).map_err(|e| format!("device→host: {e}"))?;
-    let max_err = output_vec.iter().zip(&reference_vec).map(|(g, r)| (g - r).abs()).fold(0.0_f32, f32::max);
-
+fn check_and_print(max_err: f32) {
     println!("max absolute error: {max_err:.2e}");
     if max_err >= MAX_ABS_ERR {
         eprintln!("FAIL: {max_err:.2e} >= threshold {MAX_ABS_ERR:.1e}");
         std::process::exit(1);
     }
     println!("PASS (threshold {MAX_ABS_ERR:.1e})");
+}
 
-    if !args.bench {
-        return Ok(());
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = parse_args().map_err(|e| format!("arg error: {e}"))?;
+
+    let custom_dims = args.batch.is_some() || args.hidden_dim.is_some();
+
+    let ctx = CudaContext::new(0).map_err(|e| format!("CUDA context: {e}"))?;
+    let stream = ctx.default_stream();
+    let module = kernels::load(&ctx).map_err(|e| format!("PTX load: {e}"))?;
+
+    if !custom_dims {
+        // Default mode: fixture correctness check (shape must match 4×4096).
+        let f = File::open(FIXTURE).map_err(|e| format!("fixture not found at {FIXTURE}: {e}"))?;
+        let mut npz = NpzReader::new(f)?;
+        let input: Array2<f32> = npz.by_name("input.npy")?;
+        let weight: Array1<f32> = npz.by_name("weight.npy")?;
+        let reference: Array2<f32> = npz.by_name("output.npy")?;
+
+        let fix_batch = input.nrows();
+        let fix_hidden = input.ncols();
+        let (input_vec, _) = input.into_raw_vec_and_offset();
+        let (weight_vec, _) = weight.into_raw_vec_and_offset();
+        let (reference_vec, _) = reference.into_raw_vec_and_offset();
+
+        let input_dev = DeviceBuffer::from_host(&stream, &input_vec).map_err(|e| format!("alloc: {e}"))?;
+        let weight_dev = DeviceBuffer::from_host(&stream, &weight_vec).map_err(|e| format!("alloc: {e}"))?;
+        let mut output_dev = DeviceBuffer::<f32>::zeroed(&stream, input_vec.len()).map_err(|e| format!("alloc: {e}"))?;
+
+        let fix_cfg = LaunchConfig { grid_dim: (fix_batch as u32, 1, 1), block_dim: (128, 1, 1), shared_mem_bytes: 0 };
+        module.rms_norm_kernel(&stream, fix_cfg, &input_dev, &weight_dev, &mut output_dev, KERNEL_EPS, fix_hidden as u32)
+            .map_err(|e| format!("kernel: {e}"))?;
+
+        let output_vec = output_dev.to_host_vec(&stream).map_err(|e| format!("device→host: {e}"))?;
+        let max_err = output_vec.iter().zip(&reference_vec).map(|(g, r)| (g - r).abs()).fold(0.0_f32, f32::max);
+        check_and_print(max_err);
+
+        if !args.bench {
+            return Ok(());
+        }
     }
 
-    // ── Bench mode ────────────────────────────────────────────────────────────
+    // ── Bench mode / custom-shape correctness path ────────────────────────────
     let bench_batch = args.batch.unwrap_or(2048);
     let bench_hidden = args.hidden_dim.unwrap_or(4096);
     let n = bench_batch * bench_hidden;
@@ -228,10 +249,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bench_in_dev = DeviceBuffer::from_host(&stream, &bench_input).map_err(|e| format!("alloc: {e}"))?;
     let bench_wt_dev = DeviceBuffer::from_host(&stream, &bench_weight).map_err(|e| format!("alloc: {e}"))?;
     let mut bench_out_dev = DeviceBuffer::<f32>::zeroed(&stream, n).map_err(|e| format!("alloc: {e}"))?;
-    // 1-element buffer used as a stream-sync barrier; D2H of 4 bytes ≈ zero overhead.
-    let sync_buf = DeviceBuffer::<f32>::zeroed(&stream, 1).map_err(|e| format!("alloc: {e}"))?;
 
     let bench_cfg = LaunchConfig { grid_dim: (bench_batch as u32, 1, 1), block_dim: (128, 1, 1), shared_mem_bytes: 0 };
+
+    if custom_dims {
+        // Correctness check against CPU reference (replaces fixture for custom shapes).
+        let cpu_ref = rms_norm_cpu(&bench_input, &bench_weight, bench_batch, bench_hidden, KERNEL_EPS);
+        module.rms_norm_kernel(&stream, bench_cfg, &bench_in_dev, &bench_wt_dev, &mut bench_out_dev, KERNEL_EPS, bench_hidden as u32)
+            .map_err(|e| format!("kernel: {e}"))?;
+        let output_vec = bench_out_dev.to_host_vec(&stream).map_err(|e| format!("device→host: {e}"))?;
+        let max_err = output_vec.iter().zip(&cpu_ref).map(|(g, r)| (g - r).abs()).fold(0.0_f32, f32::max);
+        check_and_print(max_err);
+
+        if !args.bench {
+            return Ok(());
+        }
+    }
+
+    // 1-element buffer used as a stream-sync barrier; D2H of 4 bytes ≈ zero overhead.
+    let sync_buf = DeviceBuffer::<f32>::zeroed(&stream, 1).map_err(|e| format!("alloc: {e}"))?;
 
     for _ in 0..100 {
         module.rms_norm_kernel(&stream, bench_cfg, &bench_in_dev, &bench_wt_dev, &mut bench_out_dev, KERNEL_EPS, bench_hidden as u32)
