@@ -1,10 +1,8 @@
-//! RMS-Norm correctness binary — unified cuda-oxide compilation.
-//!
-//! Kernel + host code in one file; PTX is embedded at compile time by
-//! `cargo oxide`. No PTX file path, no env-var, no cfg splits.
+//! RMS-Norm correctness + bench binary — unified cuda-oxide compilation.
 //!
 //! Build and run:
 //!   cargo oxide run --arch sm_80
+//!   cargo oxide run --arch sm_80 -- --bench --batch 2048 --hidden-dim 4096
 
 use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
 use cuda_device::{DisjointSlice, SharedArray, cuda_module, device, kernel, thread, warp};
@@ -12,12 +10,43 @@ use ndarray::{Array1, Array2};
 use ndarray_npy::NpzReader;
 use std::fs::File;
 
-// Fixture lives in the sibling library crate; path is relative to crate root.
 const FIXTURE: &str = "../cuda_oxide/tests/fixtures/rms_norm_4x4096.npz";
-/// Epsilon for numerical stability inside the kernel.
 const KERNEL_EPS: f32 = 1e-5;
-/// Correctness threshold: max abs error vs. PyTorch reference (fp32).
 const MAX_ABS_ERR: f32 = 1e-4;
+
+// =============================================================================
+// CLI ARGUMENTS
+// =============================================================================
+
+struct Args {
+    batch: Option<usize>,
+    hidden_dim: Option<usize>,
+    bench: bool,
+}
+
+fn parse_args() -> Result<Args, String> {
+    let mut args = Args { batch: None, hidden_dim: None, bench: false };
+    let raw: Vec<String> = std::env::args().collect();
+    let mut i = 1;
+    while i < raw.len() {
+        match raw[i].as_str() {
+            "--batch" => {
+                i += 1;
+                let v = raw.get(i).ok_or("--batch requires a value")?;
+                args.batch = Some(v.parse().map_err(|_| format!("--batch: {v}"))?);
+            }
+            "--hidden-dim" => {
+                i += 1;
+                let v = raw.get(i).ok_or("--hidden-dim requires a value")?;
+                args.hidden_dim = Some(v.parse().map_err(|_| format!("--hidden-dim: {v}"))?);
+            }
+            "--bench" => args.bench = true,
+            other => return Err(format!("unknown argument: {other}")),
+        }
+        i += 1;
+    }
+    Ok(args)
+}
 
 // =============================================================================
 // DEVICE HELPER — compiled to PTX alongside the kernel
@@ -77,7 +106,6 @@ mod kernels {
         let hdim = hidden_dim as usize;
         let row_base = row * hdim;
 
-        // Pass 1: accumulate sum-of-squares over this thread's strided columns.
         let mut sum_sq: f32 = 0.0;
         let mut col = tid;
         while col < hdim {
@@ -86,7 +114,6 @@ mod kernels {
             col += 128;
         }
 
-        // Warp-level reduction: five shuffle-downs fold 32 lanes into lane 0.
         sum_sq += warp::shuffle_down_f32(sum_sq, 16);
         sum_sq += warp::shuffle_down_f32(sum_sq, 8);
         sum_sq += warp::shuffle_down_f32(sum_sq, 4);
@@ -126,7 +153,6 @@ mod kernels {
             RMS_INV[0]
         };
 
-        // Pass 2: normalize and write output.
         let mut col = tid;
         while col < hdim {
             let out_idx = row_base + col;
@@ -147,70 +173,127 @@ mod kernels {
 // HOST CODE — compiled to native x86_64 by LLVM
 // =============================================================================
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let f = File::open(FIXTURE)
-        .map_err(|e| format!("fixture not found at {FIXTURE}: {e}"))?;
-    let mut npz = NpzReader::new(f)?;
+/// CPU reference for correctness checks when the fixture shape doesn't match.
+fn rms_norm_cpu(input: &[f32], weight: &[f32], batch: usize, hidden: usize, eps: f32) -> Vec<f32> {
+    let mut out = vec![0.0_f32; batch * hidden];
+    for row in 0..batch {
+        let base = row * hidden;
+        let sum_sq: f32 = input[base..base + hidden].iter().map(|&x| x * x).sum();
+        let rms_inv = 1.0_f32 / (sum_sq / hidden as f32 + eps).sqrt();
+        for col in 0..hidden {
+            out[base + col] = input[base + col] * rms_inv * weight[col];
+        }
+    }
+    out
+}
 
-    let input: Array2<f32> = npz.by_name("input.npy")?;
-    let weight: Array1<f32> = npz.by_name("weight.npy")?;
-    let reference: Array2<f32> = npz.by_name("output.npy")?;
-
-    let batch = input.nrows();
-    let hidden_dim = input.ncols();
-    let (input_vec, _) = input.into_raw_vec_and_offset();
-    let (weight_vec, _) = weight.into_raw_vec_and_offset();
-    let (reference_vec, _) = reference.into_raw_vec_and_offset();
-
-    let ctx = CudaContext::new(0)
-        .map_err(|e| format!("CUDA context failed: {e}"))?;
-    let stream = ctx.default_stream();
-
-    let module = kernels::load(&ctx)
-        .map_err(|e| format!("embedded PTX load failed: {e}"))?;
-
-    let input_dev = DeviceBuffer::from_host(&stream, &input_vec)
-        .map_err(|e| format!("device alloc failed: {e}"))?;
-    let weight_dev = DeviceBuffer::from_host(&stream, &weight_vec)
-        .map_err(|e| format!("device alloc failed: {e}"))?;
-    let mut output_dev = DeviceBuffer::<f32>::zeroed(&stream, input_vec.len())
-        .map_err(|e| format!("device alloc failed: {e}"))?;
-
-    let cfg = LaunchConfig {
-        grid_dim: (batch as u32, 1, 1),
-        block_dim: (128, 1, 1),
-        shared_mem_bytes: 0,
-    };
-
-    module
-        .rms_norm_kernel(
-            &stream,
-            cfg,
-            &input_dev,
-            &weight_dev,
-            &mut output_dev,
-            KERNEL_EPS,
-            hidden_dim as u32,
-        )
-        .map_err(|e| format!("kernel launch failed: {e}"))?;
-
-    let output_vec = output_dev
-        .to_host_vec(&stream)
-        .map_err(|e| format!("device→host copy failed: {e}"))?;
-
-    let max_err = output_vec
-        .iter()
-        .zip(&reference_vec)
-        .map(|(got, want)| (got - want).abs())
-        .fold(0.0_f32, f32::max);
-
+fn check_and_print(max_err: f32) {
     println!("max absolute error: {max_err:.2e}");
-
     if max_err >= MAX_ABS_ERR {
         eprintln!("FAIL: {max_err:.2e} >= threshold {MAX_ABS_ERR:.1e}");
         std::process::exit(1);
     }
-
     println!("PASS (threshold {MAX_ABS_ERR:.1e})");
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = parse_args().map_err(|e| format!("arg error: {e}"))?;
+
+    let custom_dims = args.batch.is_some() || args.hidden_dim.is_some();
+
+    let ctx = CudaContext::new(0).map_err(|e| format!("CUDA context: {e}"))?;
+    let stream = ctx.default_stream();
+    let module = kernels::load(&ctx).map_err(|e| format!("PTX load: {e}"))?;
+
+    if !custom_dims {
+        // Default mode: fixture correctness check (shape must match 4×4096).
+        let f = File::open(FIXTURE).map_err(|e| format!("fixture not found at {FIXTURE}: {e}"))?;
+        let mut npz = NpzReader::new(f)?;
+        let input: Array2<f32> = npz.by_name("input.npy")?;
+        let weight: Array1<f32> = npz.by_name("weight.npy")?;
+        let reference: Array2<f32> = npz.by_name("output.npy")?;
+
+        let fix_batch = input.nrows();
+        let fix_hidden = input.ncols();
+        let (input_vec, _) = input.into_raw_vec_and_offset();
+        let (weight_vec, _) = weight.into_raw_vec_and_offset();
+        let (reference_vec, _) = reference.into_raw_vec_and_offset();
+
+        let input_dev = DeviceBuffer::from_host(&stream, &input_vec).map_err(|e| format!("alloc: {e}"))?;
+        let weight_dev = DeviceBuffer::from_host(&stream, &weight_vec).map_err(|e| format!("alloc: {e}"))?;
+        let mut output_dev = DeviceBuffer::<f32>::zeroed(&stream, input_vec.len()).map_err(|e| format!("alloc: {e}"))?;
+
+        let fix_cfg = LaunchConfig { grid_dim: (fix_batch as u32, 1, 1), block_dim: (128, 1, 1), shared_mem_bytes: 0 };
+        module.rms_norm_kernel(&stream, fix_cfg, &input_dev, &weight_dev, &mut output_dev, KERNEL_EPS, fix_hidden as u32)
+            .map_err(|e| format!("kernel: {e}"))?;
+
+        let output_vec = output_dev.to_host_vec(&stream).map_err(|e| format!("device→host: {e}"))?;
+        let max_err = output_vec.iter().zip(&reference_vec).map(|(g, r)| (g - r).abs()).fold(0.0_f32, f32::max);
+        check_and_print(max_err);
+
+        if !args.bench {
+            return Ok(());
+        }
+    }
+
+    // ── Bench mode / custom-shape correctness path ────────────────────────────
+    let bench_batch = args.batch.unwrap_or(2048);
+    let bench_hidden = args.hidden_dim.unwrap_or(4096);
+    let n = bench_batch * bench_hidden;
+
+    // Deterministic synthetic data; values span ±1 without an external RNG dep.
+    let bench_input: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.001_f32).sin()).collect();
+    let bench_weight: Vec<f32> =
+        (0..bench_hidden).map(|i| 1.0_f32 + ((i as f32) * 0.001_f32).cos() * 0.1_f32).collect();
+
+    let bench_in_dev = DeviceBuffer::from_host(&stream, &bench_input).map_err(|e| format!("alloc: {e}"))?;
+    let bench_wt_dev = DeviceBuffer::from_host(&stream, &bench_weight).map_err(|e| format!("alloc: {e}"))?;
+    let mut bench_out_dev = DeviceBuffer::<f32>::zeroed(&stream, n).map_err(|e| format!("alloc: {e}"))?;
+
+    let bench_cfg = LaunchConfig { grid_dim: (bench_batch as u32, 1, 1), block_dim: (128, 1, 1), shared_mem_bytes: 0 };
+
+    if custom_dims {
+        // Correctness check against CPU reference (replaces fixture for custom shapes).
+        let cpu_ref = rms_norm_cpu(&bench_input, &bench_weight, bench_batch, bench_hidden, KERNEL_EPS);
+        module.rms_norm_kernel(&stream, bench_cfg, &bench_in_dev, &bench_wt_dev, &mut bench_out_dev, KERNEL_EPS, bench_hidden as u32)
+            .map_err(|e| format!("kernel: {e}"))?;
+        let output_vec = bench_out_dev.to_host_vec(&stream).map_err(|e| format!("device→host: {e}"))?;
+        let max_err = output_vec.iter().zip(&cpu_ref).map(|(g, r)| (g - r).abs()).fold(0.0_f32, f32::max);
+        check_and_print(max_err);
+
+        if !args.bench {
+            return Ok(());
+        }
+    }
+
+    // 1-element buffer used as a stream-sync barrier; D2H of 4 bytes ≈ zero overhead.
+    let sync_buf = DeviceBuffer::<f32>::zeroed(&stream, 1).map_err(|e| format!("alloc: {e}"))?;
+
+    for _ in 0..100 {
+        module.rms_norm_kernel(&stream, bench_cfg, &bench_in_dev, &bench_wt_dev, &mut bench_out_dev, KERNEL_EPS, bench_hidden as u32)
+            .map_err(|e| format!("warm-up: {e}"))?;
+    }
+    sync_buf.to_host_vec(&stream).map_err(|e| format!("sync: {e}"))?;
+
+    let mut times_us: Vec<f64> = Vec::with_capacity(1000);
+    for _ in 0..1000 {
+        let t0 = std::time::Instant::now();
+        module.rms_norm_kernel(&stream, bench_cfg, &bench_in_dev, &bench_wt_dev, &mut bench_out_dev, KERNEL_EPS, bench_hidden as u32)
+            .map_err(|e| format!("bench: {e}"))?;
+        sync_buf.to_host_vec(&stream).map_err(|e| format!("sync: {e}"))?;
+        times_us.push(t0.elapsed().as_secs_f64() * 1e6);
+    }
+
+    times_us.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let p50 = times_us[499];
+    let p99 = times_us[989];
+    let bytes = (2 * bench_batch * bench_hidden + bench_hidden) as f64 * 4.0;
+    let throughput_gbs = bytes / (p50 / 1e6) / 1e9;
+
+    println!(
+        r#"{{"backend":"cuda_oxide","batch":{b},"hidden_dim":{h},"p50_us":{p50:.3},"p99_us":{p99:.3},"throughput_gbs":{gbs:.2}}}"#,
+        b = bench_batch, h = bench_hidden, p50 = p50, p99 = p99, gbs = throughput_gbs
+    );
+
     Ok(())
 }

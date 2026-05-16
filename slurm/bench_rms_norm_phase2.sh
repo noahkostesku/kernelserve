@@ -1,0 +1,57 @@
+#!/bin/bash
+#SBATCH --job-name=kernelserve-rms-norm-phase2
+#SBATCH --account=def-cbravo
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --gpus-per-node=a100:1
+#SBATCH --mem=32G
+#SBATCH --time=0-00:45:00
+#SBATCH --output=/scratch/%u/kernelserve-logs/%j-out.txt
+#SBATCH --error=/scratch/%u/kernelserve-logs/%j-err.txt
+
+set -euo pipefail
+
+# ── Environment ──────────────────────────────────────────────────────────────
+module load StdEnv/2023 gcc/12.3 cuda/12.9 llvm/18.1.8 clang/18.1.8 rust/1.91.0 python/3.11
+export PATH=$HOME/.cargo/bin:$HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/bin:$PATH
+export CUDA_OXIDE_BACKEND=$SCRATCH/cuda-oxide/crates/rustc-codegen-cuda/target/release/librustc_codegen_cuda.so
+export RUSTFLAGS="-L $HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib"
+export LD_LIBRARY_PATH=$HOME/.rustup/toolchains/nightly-2026-04-03-x86_64-unknown-linux-gnu/lib:/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Core/cudacore/12.9.1/lib64:${LD_LIBRARY_PATH:-}
+export LIBCLANG_PATH=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/clang/18.1.8/lib
+export CUDA_OXIDE_LLC=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/llvmcore/21.1.5/bin/llc
+export MLFLOW_TRACKING_URI="file://$SCRATCH/mlruns"
+
+REPO_DIR="$SCRATCH/kernelserve"
+
+# ── Activate Python venv ─────────────────────────────────────────────────────
+if [[ ! -d "$REPO_DIR/.venv" ]]; then
+    echo "ERROR: venv not found at $REPO_DIR/.venv. Run: python -m venv .venv && uv sync" >&2
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "$REPO_DIR/.venv/bin/activate"
+
+cd "$REPO_DIR"
+
+# ── Correctness check (exit early if kernel is wrong) ─────────────────────────
+echo "=== rms-norm correctness check ==="
+cd "$REPO_DIR/kernels/rms_norm_standalone"
+cargo oxide run --arch "${CUDA_ARCH:-sm_80}" --verbose
+cd "$REPO_DIR"
+
+# ── Build release binary (used by bench_rms_norm.py via subprocess) ───────────
+echo "=== Building rms-norm release binary ==="
+cd "$REPO_DIR/kernels/rms_norm_standalone"
+cargo oxide build --arch "${CUDA_ARCH:-sm_80}"
+cd "$REPO_DIR"
+
+export CUDA_OXIDE_BIN="$REPO_DIR/kernels/rms_norm_standalone/target/release/rms_norm"
+
+# ── Run Phase 2 benchmark: 3 backends × 3 shapes → MLflow ────────────────────
+echo "=== Phase 2 benchmark (3 backends × 3 shapes) ==="
+srun python "$REPO_DIR/experiments/bench_rms_norm.py"
+
+echo "=== Job ${SLURM_JOB_ID} complete ==="
+echo "Run: seff ${SLURM_JOB_ID}"
+echo "MLflow: ${MLFLOW_TRACKING_URI}"

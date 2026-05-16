@@ -37,6 +37,7 @@ dev-dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 markers = [
     "gpu: marks tests requiring a physical CUDA GPU (deselect with -m 'not gpu')",
