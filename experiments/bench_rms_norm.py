@@ -135,6 +135,17 @@ def main() -> None:
         print("ERROR: CUDA not available", file=sys.stderr)
         sys.exit(1)
 
+    from observability.metrics.gpu import sample_gpu_metrics
+    from observability.otel.instrumentation import create_meter, create_tracer
+
+    tracer = create_tracer("kernelserve-bench")
+    meter = create_meter("kernelserve-bench")
+    p50_gauge = meter.create_gauge("kernelserve_bench_latency_p50_us", unit="us")
+    p99_gauge = meter.create_gauge("kernelserve_bench_latency_p99_us", unit="us")
+    tput_gauge = meter.create_gauge("kernelserve_bench_throughput_gbs", unit="GB/s")
+    gpu_util_gauge = meter.create_gauge("kernelserve_gpu_utilization_percent", unit="%")
+    gpu_mem_gauge = meter.create_gauge("kernelserve_gpu_memory_used_gb", unit="GB")
+
     benchers = [
         ("pytorch", bench_pytorch),
         ("triton", bench_triton),
@@ -145,12 +156,34 @@ def main() -> None:
         print(f"\n=== shape {batch}x{hidden_dim} ===")
         for name, bencher in benchers:
             print(f"  [{name}] benchmarking...", end=" ", flush=True)
-            result = bencher(batch, hidden_dim)
+            attrs = {"backend_name": name, "shape": f"{batch}x{hidden_dim}"}
+            with tracer.start_as_current_span(f"bench.rms_norm.{name}") as span:
+                span.set_attribute("backend_name", name)
+                span.set_attribute("batch_size", batch)
+                span.set_attribute("input_seq_len", hidden_dim)
+                span.set_attribute("kernel_variant", "rms_norm")
+                span.set_attribute("kernel.name", "rms_norm")
+                span.set_attribute("sm.target", os.environ.get("CUDA_ARCH", "sm_80"))
+                span.set_attribute("shape", f"{batch}x{hidden_dim}")
+                span.add_event("gpu.sample.start", attributes=sample_gpu_metrics())
+                result = bencher(batch, hidden_dim)
+                span.add_event("gpu.sample.end", attributes=sample_gpu_metrics())
+                span.set_attribute("latency_p50_us", result.p50_us)
+                span.set_attribute("latency_p99_us", result.p99_us)
+                span.set_attribute("throughput_gbs", result.throughput_gbs)
             log_result(result)
             print(
                 f"p50={result.p50_us:.1f}µs  p99={result.p99_us:.1f}µs  "
                 f"tput={result.throughput_gbs:.1f} GB/s"
             )
+            gauge_attrs = attrs | {"kernel": "rms_norm"}
+            p50_gauge.set(result.p50_us, gauge_attrs)
+            p99_gauge.set(result.p99_us, gauge_attrs)
+            tput_gauge.set(result.throughput_gbs, gauge_attrs)
+            gpu_snap = sample_gpu_metrics()
+            if gpu_snap:
+                gpu_util_gauge.set(gpu_snap["gpu.util_pct"], attrs)
+                gpu_mem_gauge.set(gpu_snap["gpu.mem_used_gb"], attrs)
 
     print("\nDone. Results logged to MLflow.")
 
