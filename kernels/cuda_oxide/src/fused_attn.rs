@@ -33,7 +33,11 @@ impl FusedAttn {
     /// * `head_dim`  — dimension per head (must be power of 2, ≤ 128 for sm_80)
     pub fn new(num_heads: usize, head_dim: usize) -> Self {
         let scale = 1.0 / (head_dim as f32).sqrt();
-        Self { num_heads, head_dim, scale }
+        Self {
+            num_heads,
+            head_dim,
+            scale,
+        }
     }
 
     /// Forward pass: compute attention output from packed QKV input.

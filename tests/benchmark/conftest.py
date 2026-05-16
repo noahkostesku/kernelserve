@@ -16,6 +16,7 @@ def gpu_device() -> str:
     """Return the CUDA device string, or skip if no GPU is available."""
     try:
         import torch
+
         if not torch.cuda.is_available():
             pytest.skip("No CUDA GPU available")
         return f"cuda:{torch.cuda.current_device()}"
@@ -43,6 +44,7 @@ def triton_client():
     """Connect to a local Triton Inference Server, or skip if not running."""
     try:
         import tritonclient.grpc as grpcclient
+
         client = grpcclient.InferenceServerClient("localhost:8001")
         if not client.is_server_live():
             pytest.skip("Triton Inference Server is not running at localhost:8001")
@@ -53,8 +55,6 @@ def triton_client():
 
 def _get_git_sha() -> str:
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], text=True
-        ).strip()
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
     except Exception:
         return "unknown"
