@@ -10,7 +10,98 @@
     "to": "now"
   },
   "tags": ["kernelserve", "gpu", "triton"],
-  "panels": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "p50 Latency by Backend (µs)",
+      "type": "barchart",
+      "gridPos": {"w": 8, "h": 8, "x": 0, "y": 0},
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "kernelserve_bench_latency_p50_us{shape=~\"$shape\", kernel_name=~\"$kernel\"}",
+          "legendFormat": "{{backend_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "p99 Latency by Backend (µs)",
+      "type": "barchart",
+      "gridPos": {"w": 8, "h": 8, "x": 8, "y": 0},
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "kernelserve_bench_latency_p99_us{shape=~\"$shape\", kernel_name=~\"$kernel\"}",
+          "legendFormat": "{{backend_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Throughput by Backend (GB/s)",
+      "type": "barchart",
+      "gridPos": {"w": 8, "h": 8, "x": 16, "y": 0},
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "kernelserve_bench_throughput_gbs{shape=~\"$shape\", kernel_name=~\"$kernel\"}",
+          "legendFormat": "{{backend_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "GB/s"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "GPU Utilization (%)",
+      "type": "timeseries",
+      "gridPos": {"w": 12, "h": 8, "x": 0, "y": 8},
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "kernelserve_gpu_utilization_percent",
+          "legendFormat": "{{backend_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "GPU Memory Used (GB)",
+      "type": "timeseries",
+      "gridPos": {"w": 12, "h": 8, "x": 12, "y": 8},
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "kernelserve_gpu_memory_used_gb",
+          "legendFormat": "{{backend_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decgbytes"
+        }
+      }
+    }
+  ],
   "templating": {
     "list": [
       {
@@ -18,6 +109,20 @@
         "type": "query",
         "label": "Kernel",
         "query": "label_values(kernelserve_kernel_latency_seconds_bucket, kernel_name)",
+        "datasource": "Prometheus"
+      },
+      {
+        "name": "backend",
+        "type": "query",
+        "label": "Backend",
+        "query": "label_values(kernelserve_bench_latency_p50_us, backend_name)",
+        "datasource": "Prometheus"
+      },
+      {
+        "name": "shape",
+        "type": "query",
+        "label": "Shape",
+        "query": "label_values(kernelserve_bench_latency_p50_us, shape)",
         "datasource": "Prometheus"
       }
     ]

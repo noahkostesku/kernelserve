@@ -18,23 +18,22 @@ processors:
     limit_mib: 512
 
 exporters:
+  otlp/jaeger:
+    endpoint: "${env:JAEGER_ENDPOINT}"
+    tls:
+      insecure: true
   prometheus:
     endpoint: "0.0.0.0:8889"
     namespace: "kernelserve"
   logging:
     verbosity: normal
-  # TODO: add OTLP export to a remote backend (Grafana Cloud, Jaeger, etc.)
-  # otlp/remote:
-  #   endpoint: ${env:OTEL_REMOTE_ENDPOINT}
-  #   headers:
-  #     authorization: "Bearer ${env:OTEL_REMOTE_TOKEN}"
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [logging]
+      exporters: [otlp/jaeger, logging]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
