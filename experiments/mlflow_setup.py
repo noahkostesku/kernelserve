@@ -63,9 +63,7 @@ def log_kernel_run(
 
 def _get_git_sha() -> str:
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], text=True
-        ).strip()
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
     except Exception:
         return "unknown"
 

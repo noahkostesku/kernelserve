@@ -19,12 +19,14 @@ import torch
 try:
     import triton
     import triton.language as tl
+
     _TRITON_AVAILABLE = True
 except ImportError:
     _TRITON_AVAILABLE = False
 
 
 if _TRITON_AVAILABLE:
+
     @triton.jit
     def _rms_norm_kernel(
         x_ptr,

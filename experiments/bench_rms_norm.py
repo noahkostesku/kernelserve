@@ -41,9 +41,7 @@ def _throughput_gbs(batch: int, hidden_dim: int, p50_us: float) -> float:
     return bytes_total / (p50_us / 1e6) / 1e9
 
 
-def _bench_torch_fn(
-    fn: object, x: torch.Tensor, weight: torch.Tensor
-) -> tuple[float, float]:
+def _bench_torch_fn(fn: object, x: torch.Tensor, weight: torch.Tensor) -> tuple[float, float]:
     """Time a GPU callable with CUDA events. Returns (p50_us, p99_us)."""
     import typing
 
@@ -100,10 +98,7 @@ def bench_cuda_oxide(batch: int, hidden_dim: int) -> BenchResult:
         text=True,
         check=True,
     )
-    json_line = next(
-        line for line in result.stdout.splitlines()
-        if line.strip().startswith("{")
-    )
+    json_line = next(line for line in result.stdout.splitlines() if line.strip().startswith("{"))
     data: dict[str, float] = json.loads(json_line)
     p50 = float(data["p50_us"])
     p99 = float(data["p99_us"])
@@ -115,9 +110,7 @@ def log_result(result: BenchResult) -> None:
     mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
     exp_name = f"kernelserve/rms_norm/{result.backend}/{CLUSTER}/{MONTH}"
     experiment = mlflow.set_experiment(exp_name)
-    git_sha = subprocess.check_output(
-        ["git", "rev-parse", "--short", "HEAD"], text=True
-    ).strip()
+    git_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
     with mlflow.start_run(experiment_id=experiment.experiment_id):
         mlflow.set_tag("git_sha", git_sha)
         mlflow.log_params({"batch": result.batch, "hidden_dim": result.hidden_dim})

@@ -13,7 +13,7 @@
 use thiserror::Error;
 
 #[cfg(feature = "gpu")]
-use cuda_device::{DisjointSlice, SharedArray, cuda_module, kernel, thread, warp};
+use cuda_device::{cuda_module, kernel, thread, warp, DisjointSlice, SharedArray};
 
 #[derive(Debug, Error)]
 pub enum RmsNormError {
@@ -144,14 +144,14 @@ impl RmsNorm {
     /// Returns [`RmsNormError::CudaLaunch`] if the CUDA kernel fails to launch.
     #[cfg(feature = "gpu")]
     pub fn forward(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>, RmsNormError> {
-        use std::sync::Arc;
         use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+        use std::sync::Arc;
 
         let hidden_dim = weight.len();
         let batch = input.len() / hidden_dim;
 
-        let ctx: Arc<CudaContext> = CudaContext::new(0)
-            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
+        let ctx: Arc<CudaContext> =
+            CudaContext::new(0).map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
         let stream = ctx.default_stream();
 
         // PTX path: set KERNELSERVE_PTX or place the file at ptx/kernelserve-kernels.ptx
@@ -160,8 +160,8 @@ impl RmsNorm {
         let cu_module = ctx
             .load_module_from_file(&ptx_path)
             .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
-        let module = kernels::from_module(cu_module)
-            .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
+        let module =
+            kernels::from_module(cu_module).map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
 
         let input_dev = DeviceBuffer::from_host(&stream, input)
             .map_err(|e| RmsNormError::CudaLaunch(e.to_string()))?;
