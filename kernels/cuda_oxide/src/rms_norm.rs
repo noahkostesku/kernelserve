@@ -197,6 +197,8 @@ impl RmsNorm {
     pub fn forward(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>, RmsNormError> {
         let hidden_dim = weight.len();
         let batch = input.len() / hidden_dim;
-        Ok(crate::cpu_ref::rms_norm_cpu(input, weight, batch, hidden_dim, self.eps))
+        Ok(crate::cpu_ref::rms_norm_cpu(
+            input, weight, batch, hidden_dim, self.eps,
+        ))
     }
 }

@@ -12,6 +12,13 @@ import numpy as np
 import pytest
 import torch
 
+import kernelserve
+
+pytestmark = pytest.mark.skipif(
+    not kernelserve._CORE_AVAILABLE,
+    reason="kernelserve_core not built — run: make build-bindings",
+)
+
 FIXTURE = pathlib.Path("kernels/cuda_oxide/tests/fixtures/rms_norm_4x4096.npz")
 MAX_ABS_ERR = 1e-4
 
