@@ -28,6 +28,61 @@ Kernel: scalar-naive RMS-Norm with warp-shuffle reduction. MLflow experiment for
 
 ---
 
+## Quick Start
+
+```bash
+git clone https://github.com/noahkostesku/kernelserve
+cd kernelserve
+make build-bindings
+ks bench --kernel rms_norm
+ks compare --kernel rms_norm
+```
+
+---
+
+## Installation
+
+**Requirements:** Python 3.11+, Rust nightly, maturin
+
+```bash
+pip install maturin
+make build-bindings
+```
+
+---
+
+## Usage
+
+**Python API**
+
+```python
+import kernelserve
+kernelserve.rms_norm(x, w)
+```
+
+**CLI — bench**
+
+```bash
+ks bench --kernel rms_norm --batch 2048 --hidden-dim 4096
+```
+
+**CLI — compare**
+
+```bash
+ks compare --kernel rms_norm
+```
+
+---
+
+## Local Observability Stack
+
+```bash
+docker compose up -d
+# Grafana at localhost:3000, Jaeger at localhost:16686
+```
+
+---
+
 ## What This Is
 
 KernelServe is a GPU kernel benchmarking platform that measures custom cuda-oxide Rust kernels (scalar-naive RMS-Norm with warp-shuffle reduction) against Triton JIT and PyTorch baselines across multiple tensor shapes and GPU architectures. Benchmark runs are tracked end-to-end with MLflow experiment logging, OpenTelemetry distributed tracing, pynvml GPU utilization sampling, and a Grafana dashboard for cross-backend comparison. The platform runs on Alliance Canada HPC (Narval A100 40 GB, Nibi H100 80 GB) via SLURM job submission, with a local docker-compose stack for development and dashboard validation.
@@ -137,6 +192,7 @@ mlflow ui --backend-store-uri file://$SCRATCH/mlruns
 | 2 | Three-backend benchmark (cuda-oxide / Triton / PyTorch) across three shapes on Narval A100; 9 MLflow runs logged |
 | 3 | OpenTelemetry tracing + pynvml GPU sampling in bench harness; Grafana dashboard with 5 panels; Jaeger trace export on SLURM |
 | 4 | Phase 3 benchmark re-run on Nibi H100 (sm\_90); A100 vs H100 comparison; peak 1409 GB/s cuda-oxide throughput |
+| 5 | Python bindings via maturin; `ks` CLI (`bench`, `compare`); `kernelserve.rms_norm()` Python API; both Narval A100 and Nibi H100 supported |
 
 ---
 
