@@ -42,3 +42,23 @@ services:
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
+
+  # CPU mock dev container — no nvidia runtime required.
+  # Start with: docker-compose --profile kernelserve up kernelserve
+  kernelserve:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    profiles:
+      - kernelserve
+    environment:
+      - KERNELSERVE_DEVICE=cpu
+      - MLFLOW_TRACKING_URI=file:///app/mlruns
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4317
+    volumes:
+      - mlruns:/app/mlruns
+    depends_on:
+      - otelcol
+
+volumes:
+  mlruns:

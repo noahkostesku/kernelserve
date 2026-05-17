@@ -194,8 +194,9 @@ impl RmsNorm {
     }
 
     #[cfg(not(feature = "gpu"))]
-    pub fn forward(&self, _input: &[f32], _weight: &[f32]) -> Result<Vec<f32>, RmsNormError> {
-        let _ = self.eps;
-        todo!("rms_norm forward: build with --features gpu")
+    pub fn forward(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>, RmsNormError> {
+        let hidden_dim = weight.len();
+        let batch = input.len() / hidden_dim;
+        Ok(crate::cpu_ref::rms_norm_cpu(input, weight, batch, hidden_dim, self.eps))
     }
 }

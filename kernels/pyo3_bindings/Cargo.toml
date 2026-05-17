@@ -1,0 +1,21 @@
+[package]
+name    = "kernelserve-py"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name       = "kernelserve_core"
+crate-type = ["cdylib"]
+
+[features]
+default = []
+gpu     = ["kernelserve-kernels/gpu"]
+
+[dependencies]
+kernelserve-kernels = { path = "../cuda_oxide" }
+pyo3 = { version = "0.21", features = ["extension-module"] }
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
