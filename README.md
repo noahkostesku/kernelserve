@@ -28,12 +28,23 @@ Kernel: scalar-naive RMS-Norm with warp-shuffle reduction. MLflow experiment for
 
 ---
 
+## Installation
+
+**Requirements:** Python 3.11+, Rust nightly, maturin
+
+```bash
+pip install maturin
+make build-bindings
+```
+
+---
+
 ## Quick Start
 
 ```bash
 git clone https://github.com/noahkostesku/kernelserve
 cd kernelserve
-make build-bindings
+pip install maturin && make build-bindings
 ks bench --kernel rms_norm
 ks compare --kernel rms_norm
 ```
@@ -57,17 +68,6 @@ ks submit --kernel <op> --cluster narval --account def-yourpi
 
 # 5. Submit to the cluster
 sbatch slurm/generated/<op>_narval.sh
-```
-
----
-
-## Installation
-
-**Requirements:** Python 3.11+, Rust nightly, maturin
-
-```bash
-pip install maturin
-make build-bindings
 ```
 
 ---
@@ -104,21 +104,6 @@ ks new-kernel <op>
 ```bash
 ks submit --kernel <op> --cluster narval --account def-yourpi
 ```
-
----
-
-## Local Observability Stack
-
-```bash
-docker compose up -d
-# Grafana at localhost:3000, Jaeger at localhost:16686
-```
-
----
-
-## What This Is
-
-KernelServe is a GPU kernel benchmarking platform that measures custom cuda-oxide Rust kernels (scalar-naive RMS-Norm with warp-shuffle reduction) against Triton JIT and PyTorch baselines across multiple tensor shapes and GPU architectures. Benchmark runs are tracked end-to-end with MLflow experiment logging, OpenTelemetry distributed tracing, pynvml GPU utilization sampling, and a Grafana dashboard for cross-backend comparison. The platform runs on Alliance Canada HPC (Narval A100 40 GB, Nibi H100 80 GB) via SLURM job submission, with a local docker-compose stack for development and dashboard validation.
 
 ---
 
@@ -171,7 +156,8 @@ kernelserve/
 │   ├── metrics/             # pynvml GPU sampler
 │   ├── prometheus/          # scrape config
 │   └── grafana/             # dashboard JSON + provisioning
-├── slurm/                   # All SLURM job scripts
+├── slurm/
+│   └── generated/           # Scripts written by ks submit
 ├── tests/                   # Integration tests (CPU-only, no GPU marker)
 ├── docs/
 │   └── plans/               # Phase implementation plans
@@ -207,9 +193,9 @@ module load StdEnv/2023 gcc/12.3 cuda/12.2 rust/1.91.0 python/3.11 llvm/18.1.8
 # Create venv once
 python -m venv .venv && source .venv/bin/activate && uv sync
 
-# Submit benchmark job
-sbatch slurm/bench_rms_norm_phase4_nibi.sh   # Nibi H100
-sbatch slurm/bench_rms_norm_phase3.sh        # Narval A100
+# Generate and submit a benchmark job
+ks submit --kernel rms_norm --cluster narval --account def-yourpi
+sbatch slurm/generated/rms_norm_narval.sh
 
 # Check results
 mlflow ui --backend-store-uri file://$SCRATCH/mlruns
@@ -226,6 +212,7 @@ mlflow ui --backend-store-uri file://$SCRATCH/mlruns
 | 3 | OpenTelemetry tracing + pynvml GPU sampling in bench harness; Grafana dashboard with 5 panels; Jaeger trace export on SLURM |
 | 4 | Phase 3 benchmark re-run on Nibi H100 (sm\_90); A100 vs H100 comparison; peak 1409 GB/s cuda-oxide throughput |
 | 5 | Python bindings via maturin; `ks` CLI (`bench`, `compare`); `kernelserve.rms_norm()` Python API; both Narval A100 and Nibi H100 supported |
+| 6–8 | `ks new-kernel` scaffolding; `ks submit` cluster-specific SLURM generation; extensible multi-kernel platform |
 
 ---
 
