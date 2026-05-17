@@ -40,6 +40,27 @@ ks compare --kernel rms_norm
 
 ---
 
+## Researcher Workflow
+
+```bash
+# 1. Scaffold a new kernel
+ks new-kernel <op>
+
+# 2. Implement the kernel
+$EDITOR kernels/cuda_oxide/src/<op>.rs
+
+# 3. Benchmark locally (CPU mock — no GPU required)
+ks compare --kernel <op>
+
+# 4. Generate an HPC job script
+ks submit --kernel <op> --cluster narval --account def-yourpi
+
+# 5. Submit to the cluster
+sbatch slurm/generated/<op>_narval.sh
+```
+
+---
+
 ## Installation
 
 **Requirements:** Python 3.11+, Rust nightly, maturin
@@ -70,6 +91,18 @@ ks bench --kernel rms_norm --batch 2048 --hidden-dim 4096
 
 ```bash
 ks compare --kernel rms_norm
+```
+
+**CLI — new-kernel**
+
+```bash
+ks new-kernel <op>
+```
+
+**CLI — submit**
+
+```bash
+ks submit --kernel <op> --cluster narval --account def-yourpi
 ```
 
 ---
