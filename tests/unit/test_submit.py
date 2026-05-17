@@ -16,6 +16,7 @@ def _make_args(
 
 # ── _render unit tests ────────────────────────────────────────────────────────
 
+
 def test_narval_script_has_sm80():
     script = _render("rms_norm", "narval", "def-cbravo", _narval_cfg())
     assert "sm_80" in script
@@ -79,6 +80,7 @@ def test_script_ends_with_newline():
 
 # ── run_submit integration tests ──────────────────────────────────────────────
 
+
 def test_output_written_to_generated_dir(tmp_path: Path):
     with patch("kernelserve.cli.submit._find_project_root", return_value=tmp_path):
         (tmp_path / "kernels").mkdir()
@@ -124,11 +126,14 @@ def test_nibi_output_path(tmp_path: Path):
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _narval_cfg() -> dict:
     from kernelserve.cli.submit import _CLUSTERS
+
     return _CLUSTERS["narval"]
 
 
 def _nibi_cfg() -> dict:
     from kernelserve.cli.submit import _CLUSTERS
+
     return _CLUSTERS["nibi"]
