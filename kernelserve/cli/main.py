@@ -31,6 +31,15 @@ def main() -> None:
         help="Force reduced config (warmup=2, iters=5, 128×512) for quick smoke tests",
     )
 
+    new_kernel_p = sub.add_parser(
+        "new-kernel",
+        help="Scaffold a new kernel with stub files",
+    )
+    new_kernel_p.add_argument(
+        "name",
+        help="Kernel name (valid Python/Rust identifier, e.g. softmax)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "bench":
@@ -39,6 +48,9 @@ def main() -> None:
     elif args.command == "compare":
         from kernelserve.cli.compare import run_compare
         run_compare(args)
+    elif args.command == "new-kernel":
+        from kernelserve.cli.new_kernel import run_new_kernel
+        run_new_kernel(args)
     else:
         parser.print_help()
         sys.exit(1)
