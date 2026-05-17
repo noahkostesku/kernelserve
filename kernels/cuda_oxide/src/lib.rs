@@ -4,6 +4,7 @@
 //! a matching Triton baseline in `kernels/triton/` and a correctness test
 //! in `tests/correctness.rs`.
 
+pub mod cpu_ref;
 pub mod fused_attn;
 pub mod rms_norm;
 

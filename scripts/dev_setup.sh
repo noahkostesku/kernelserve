@@ -35,14 +35,18 @@ if ! command -v rustup &>/dev/null; then
 fi
 rustup show
 
-echo "=== Building cuda-oxide kernels (may fail without CUDA headers) ==="
-pushd kernels/cuda_oxide >/dev/null
-cargo build 2>&1 || echo "WARNING: cargo build failed — expected on macOS without CUDA. Skipping."
+# ── PyO3 bindings ─────────────────────────────────────────────────────────────
+echo "=== Building PyO3 CPU bindings into .venv ==="
+pushd kernels/pyo3_bindings >/dev/null
+# Use the uv .venv's maturin and Python so the extension is importable via uv run.
+env -u CONDA_PREFIX VIRTUAL_ENV="$REPO_DIR/.venv" "$REPO_DIR/.venv/bin/maturin" develop \
+    2>&1 || echo "WARNING: maturin develop failed. Re-run 'make build-bindings' after fixing."
 popd >/dev/null
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Dev setup complete ==="
-echo "Run CPU-only tests:   uv run pytest -m 'not gpu'"
+echo "Run CPU-only tests:   uv run pytest -m 'not gpu'  (or: make test)"
 echo "Run GPU tests:        uv run pytest -m gpu  (requires A100)"
+echo "Rebuild bindings:     make build-bindings"
 echo "Check deps:           bash scripts/check_deps.sh"

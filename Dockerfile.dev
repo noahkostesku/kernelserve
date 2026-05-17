@@ -1,0 +1,36 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        build-essential \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust via rustup (needed by maturin to compile the PyO3 extension)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install uv and maturin
+RUN pip install --no-cache-dir uv maturin>=1.5.0
+
+COPY pyproject.toml ./
+# Install Python deps (no GPU-specific wheels needed on CPU-only image)
+RUN uv pip install --system --no-cache \
+        torch --index-url https://download.pytorch.org/whl/cpu \
+    && uv pip install --system --no-cache \
+        mlflow>=2.12.0 numpy>=1.26.0
+
+# Copy source and build the PyO3 CPU binding
+COPY kernels/cuda_oxide/ kernels/cuda_oxide/
+COPY kernels/pyo3_bindings/ kernels/pyo3_bindings/
+RUN cd kernels/pyo3_bindings && maturin build --release --out /app/dist
+RUN pip install --no-cache-dir /app/dist/*.whl
+
+COPY kernelserve/ kernelserve/
+
+ENV KERNELSERVE_DEVICE=cpu
+ENV MLFLOW_TRACKING_URI=file:///app/mlruns
+
+CMD ["python", "-m", "kernelserve.cli.main", "bench", "--kernel", "rms_norm"]

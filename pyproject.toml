@@ -26,14 +26,18 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.scripts]
+ks = "kernelserve.cli.main:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["kernels", "serving", "observability", "experiments"]
+packages = ["kernels", "serving", "observability", "experiments", "kernelserve"]
 
 [tool.uv]
 dev-dependencies = [
     "ruff>=0.4.0",
     "mypy>=1.9.0",
     "ipython>=8.0.0",
+    "maturin>=1.5.0",
 ]
 
 [tool.pytest.ini_options]

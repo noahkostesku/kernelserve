@@ -7,11 +7,20 @@ Compute: Alliance Canada HPC (default: Narval A100 40 GB sm_80). Each layer has 
 ## Commands
 
 ```bash
-pytest -m "not gpu"                                          # before every Python push
+make test                                                    # before every Python push (build-bindings + pytest -m "not gpu")
 cargo clippy --all-targets -- -D warnings                    # before every Rust push; zero warnings required
-uv run ruff check . && uv run mypy kernels serving observability experiments
+uv run ruff check . && uv run mypy kernels serving observability experiments kernelserve
 cd kernels/cuda_oxide && cargo oxide build --release         # NOT cargo build
 sbatch slurm/bench_job.sh                                    # submit benchmark; use srun inside sbatch, never raw python
+
+# Phase 5 — local usability
+make dev                                                     # full bootstrap: uv sync + build-bindings
+make build-bindings                                          # rebuild CPU PyO3 binding into .venv
+make build-bindings-gpu                                      # rebuild GPU binding (cargo oxide first)
+make test                                                    # build-bindings then pytest -m "not gpu"
+uv run ks bench --kernel rms_norm                           # benchmark (JSON + optional MLflow)
+uv run ks compare --kernel rms_norm                         # side-by-side table
+docker-compose --profile kernelserve up kernelserve         # CPU mock container (no nvidia runtime)
 ```
 
 ## Layout
@@ -19,7 +28,9 @@ sbatch slurm/bench_job.sh                                    # submit benchmark;
 | Layer | Directory | Language |
 |---|---|---|
 | Custom kernels | `kernels/cuda_oxide/` | Rust (cuda-oxide) |
+| PyO3 bindings | `kernels/pyo3_bindings/` | Rust (maturin/PyO3) |
 | Baseline kernels | `kernels/triton/` | Python (Triton) |
+| Python package + CLI | `kernelserve/` | Python |
 | Serving | `serving/` | Python |
 | Observability | `observability/` | Python / YAML |
 | Experiments | `experiments/` | Python |
@@ -45,9 +56,10 @@ sbatch slurm/bench_job.sh                                    # submit benchmark;
 
 - Experiment name format (all five segments required): `kernelserve/<kernel>/<backend>/<cluster>/<YYYY-MM>`
   - Example: `kernelserve/rms_norm/cuda_oxide/narval/2026-05`
+  - Local runs: use `local` as `<cluster>` — e.g. `kernelserve/rms_norm/cpu_ref/local/2026-05`
   - Short names like `kernelserve/rms_norm` mix Phase 1 and Phase 2 runs — reject them
 - Tag every run: `mlflow.set_tag("git_sha", subprocess.check_output(["git","rev-parse","--short","HEAD"]).decode())`
-- MLflow URI on HPC: `file://$SCRATCH/mlruns`
+- MLflow URI on HPC: `file://$SCRATCH/mlruns`; locally defaults to `file://./mlruns`
 
 ## HPC
 
@@ -81,3 +93,6 @@ sbatch slurm/bench_job.sh                                    # submit benchmark;
 - `unwrap()` and `expect()` are banned in `kernels/cuda_oxide/src/`; allowed only in `tests/`
 - Correctness threshold is max abs error < 1e-4 (fp32) vs PyTorch reference — "looks close" is not a passing test
 - After changing a Triton kernel signature, bump `version` or clear `~/.triton/` cache; stale cache silently runs old code
+- PyO3 GPU build is a 2-step process: `cargo oxide build` first (embeds PTX), then `maturin develop --features gpu`. Maturin alone cannot compile cuda-oxide kernels.
+- `kernels/pyo3_bindings/` module-name `kernelserve._core` requires the Rust `#[pymodule]` function to be named `_core` (last segment of module path)
+- `KERNELSERVE_DEVICE=cpu` forces CPU reference path regardless of GPU availability
