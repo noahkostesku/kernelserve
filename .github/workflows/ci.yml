@@ -79,8 +79,12 @@ jobs:
 
       - name: Build PyO3 bindings
         run: |
-          pip install maturin
-          cd kernels/pyo3_bindings && maturin develop
+          if [ -d "kernels/pyo3_bindings" ]; then
+            pip install maturin
+            cd kernels/pyo3_bindings && maturin develop
+          else
+            echo "pyo3_bindings not present, skipping"
+          fi
 
       - name: pytest -m "not gpu"
         run: uv run pytest -m "not gpu" -x --tb=short

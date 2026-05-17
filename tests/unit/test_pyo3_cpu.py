@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import math
 
 import numpy as np
 import pytest
