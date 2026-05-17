@@ -77,6 +77,11 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Build PyO3 bindings
+        run: |
+          pip install maturin
+          cd kernels/pyo3_bindings && maturin develop
+
       - name: pytest -m "not gpu"
         run: uv run pytest -m "not gpu" -x --tb=short
 
