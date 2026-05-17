@@ -4,12 +4,12 @@ import types
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from kernelserve.cli.submit import _render, run_submit
 
 
-def _make_args(kernel: str = "rms_norm", cluster: str = "narval", account: str = "def-cbravo") -> object:
+def _make_args(
+    kernel: str = "rms_norm", cluster: str = "narval", account: str = "def-cbravo"
+) -> object:
     ns = types.SimpleNamespace(kernel=kernel, cluster=cluster, account=account)
     return ns
 
