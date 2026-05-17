@@ -40,6 +40,14 @@ def main() -> None:
         help="Kernel name (valid Python/Rust identifier, e.g. softmax)",
     )
 
+    submit_p = sub.add_parser(
+        "submit",
+        help="Generate a SLURM job script for a kernel and print the sbatch command",
+    )
+    submit_p.add_argument("--kernel", required=True, choices=["rms_norm"])
+    submit_p.add_argument("--cluster", required=True, choices=["narval", "nibi"])
+    submit_p.add_argument("--account", required=True, help="SLURM account (e.g. def-cbravo)")
+
     args = parser.parse_args()
 
     if args.command == "bench":
@@ -51,6 +59,9 @@ def main() -> None:
     elif args.command == "new-kernel":
         from kernelserve.cli.new_kernel import run_new_kernel
         run_new_kernel(args)
+    elif args.command == "submit":
+        from kernelserve.cli.submit import run_submit
+        run_submit(args)
     else:
         parser.print_help()
         sys.exit(1)

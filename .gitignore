@@ -21,6 +21,7 @@ CLAUDE.local.md
 
 # SLURM
 slurm/logs/
+slurm/generated/
 *.out
 *.err
 
