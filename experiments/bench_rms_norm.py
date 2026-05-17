@@ -23,7 +23,7 @@ from kernels.triton.rms_norm import rms_norm_torch, rms_norm_triton  # type: ign
 SHAPES = [(256, 512), (2048, 4096), (4096, 8192)]
 WARMUP = 100
 ITERS = 1000
-CLUSTER = "narval"
+CLUSTER = os.environ.get("CLUSTER", "narval")
 MONTH = "2026-05"
 
 
