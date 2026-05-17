@@ -89,7 +89,16 @@ def run_bench(args: argparse.Namespace) -> None:
     if args.log_mlflow:
         import mlflow
 
+        from kernelserve.cli._mlflow_uri import mlflow_sqlite_uri
+
         month = datetime.now().strftime("%Y-%m")
+        uri, is_sqlite = mlflow_sqlite_uri()
+        if not is_sqlite:
+            print(
+                f"WARNING: sqlite3 unavailable — MLflow falling back to {uri}",
+                file=sys.stderr,
+            )
+        mlflow.set_tracking_uri(uri)
         experiment_name = f"kernelserve/{args.kernel}/{backend}/{cluster}/{month}"
         mlflow.set_experiment(experiment_name)
         with mlflow.start_run():
